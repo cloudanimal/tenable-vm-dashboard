@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tenable VM Dashboard — local, in-browser</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1f2330; --line:#2a2f3e; --txt:#e7e9ee;
+    --muted:#9aa3b2; --accent:#4f8cff; --crit:#e24b4a; --high:#ef9f27; --med:#378add;
+    --low:#888780; --ok:#3bb273; --warn:#e0a500;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--txt);line-height:1.5}
+  header{padding:20px 28px;border-bottom:1px solid var(--line);display:flex;align-items:center;
+    justify-content:space-between;flex-wrap:wrap;gap:12px}
+  h1{font-size:20px;margin:0;font-weight:600}
+  .sub{color:var(--muted);font-size:13px;margin-top:2px}
+  .priv{font-size:12px;color:var(--ok);border:1px solid var(--ok);border-radius:6px;padding:3px 9px}
+  main{padding:24px 28px;max-width:1180px;margin:0 auto}
+  .drop{border:2px dashed var(--line);border-radius:12px;padding:34px;text-align:center;background:var(--panel);
+    transition:.15s;cursor:pointer}
+  .drop.hover{border-color:var(--accent);background:var(--panel2)}
+  .drop h2{margin:0 0 6px;font-size:17px;font-weight:600}
+  .drop p{margin:4px 0;color:var(--muted);font-size:13px}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:14px;
+    cursor:pointer;font-weight:500}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--txt)}
+  .btn:hover{filter:brightness(1.08)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:14px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:14px;margin:22px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .card .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .card .v{font-size:26px;font-weight:700;margin-top:6px}
+  .card .v.s{font-size:18px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin:18px 0}
+  .panel h3{margin:0 0 14px;font-size:15px;font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em}
+  td.num,th.num{text-align:right}
+  .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+  .pill.ok{background:rgba(59,178,115,.16);color:#6fd6a0}
+  .pill.over{background:rgba(226,75,74,.16);color:#f1908f}
+  .sev-Critical{color:var(--crit);font-weight:600}
+  .sev-High{color:var(--high);font-weight:600}
+  .sev-Medium{color:var(--med)} .sev-Low{color:var(--low)}
+  .chartbox{position:relative;height:260px}
+  .hostinput{width:64px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:6px;padding:4px 6px;font-size:13px;text-align:right}
+  .hidden{display:none}
+  .foot{color:var(--muted);font-size:12px;margin:30px 0 10px;text-align:center}
+  a{color:var(--accent)}
+  @media print{
+    body{background:#fff;color:#000}
+    header .row,.drop,.noprint{display:none!important}
+    .panel,.card{break-inside:avoid;border-color:#ccc}
+    .priv{color:#000;border-color:#000}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Tenable VM Dashboard</h1>
+    <div class="sub">Upload your Tenable SC exports → instant vulnerability reports</div>
+  </div>
+  <div class="row noprint">
+    <span class="priv">&#128274; 100% local — your data never leaves this browser</span>
+    <button class="btn ghost" id="exportPdf">Export PDF</button>
+    <button class="btn ghost" id="exportCsv">Export CSV</button>
+    <button class="btn ghost" id="reset">Reset</button>
+  </div>
+</header>
+<main>
+  <section id="uploader">
+    <div class="drop" id="drop">
+      <h2>Drop your Tenable data here</h2>
+      <p>An Excel workbook with <b>cumulative</b> + <b>mitigated</b> worksheets, or separate CSV / JSON files.</p>
+      <p>Cumulative = open vulns (sourceType=cumulative). Mitigated = remediated (has <code>mitigatedDate</code>).</p>
+      <div class="row">
+        <button class="btn" id="pick">Choose files</button>
+        <button class="btn ghost" id="loadSample">Load sample data</button>
+      </div>
+      <input type="file" id="file" multiple accept=".xlsx,.xls,.csv,.json" class="hidden" />
+    </div>
+  </section>
+  <section id="dashboard" class="hidden"></section>
+  <div class="foot">
+    Built for security teams who can't send scan data to a SaaS. Open the Network tab — there are no uploads.
+    &nbsp;·&nbsp; <a href="https://github.com/cloudanimal/tenable-vm-dashboard">source on GitHub</a>
+  </div>
+</main>
+<script>
+const SLA = 0.25;                       // exploitable vulns per host
+const $ = s => document.querySelector(s);
+let STATE = { cumulative: [], mitigated: [], hostOverride: {} };
+let charts = [];
+
+// ---------- ingest ----------
+const drop = $('#drop');
+['dragover','dragenter'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('hover')}));
+['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('hover')}));
+drop.addEventListener('drop', ev => handleFiles(ev.dataTransfer.files));
+$('#pick').addEventListener('click', ()=>$('#file').click());
+$('#file').addEventListener('change', e=>handleFiles(e.target.files));
+$('#loadSample').addEventListener('click', loadSample);
+$('#reset').addEventListener('click', ()=>location.reload());
+$('#exportPdf').addEventListener('click', ()=>window.print());
+$('#exportCsv').addEventListener('click', exportCsv);
+
+function isDataSheet(rows){
+  return rows.length && rows.some(r => ('pluginID' in r) || ('exploitAvailable' in r) || ('severity' in r));
+}
+function classify(rows, name){
+  const n = (name||'').toLowerCase();
+  if(n.includes('mitigat')) return 'mitigated';
+  if(n.includes('cumulat') || n.includes('vuln')) return rows.some(r=>r.mitigatedDate)?'mitigated':'cumulative';
+  return rows.some(r=>r.mitigatedDate || String(r.hasBeenMitigated).toLowerCase()==='yes') ? 'mitigated' : 'cumulative';
+}
+function addRows(rows, name){
+  if(!rows.length) return;
+  const kind = classify(rows, name);
+  STATE[kind] = STATE[kind].concat(rows);
+}
+async function handleFiles(fileList){
+  for(const f of fileList){
+    const ext = f.name.split('.').pop().toLowerCase();
+    if(ext==='xlsx'||ext==='xls'){
+      const wb = XLSX.read(await f.arrayBuffer(), {type:'array'});
+      wb.SheetNames.forEach(sn=>{
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], {defval:''});
+        if(isDataSheet(rows)) addRows(rows, sn);
+      });
+    } else if(ext==='csv'){
+      const wb = XLSX.read(await f.text(), {type:'string'});
+      addRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:''}), f.name);
+    } else if(ext==='json'){
+      let data = JSON.parse(await f.text());
+      if(!Array.isArray(data)) data = data.results || data.response?.results || [];
+      addRows(data, f.name);
+    }
+  }
+  if(STATE.cumulative.length || STATE.mitigated.length) render();
+}
+async function loadSample(){
+  try{
+    const buf = await (await fetch('sample-data/Tenable_SC_VulnDetail_Sample.xlsx')).arrayBuffer();
+    const wb = XLSX.read(buf,{type:'array'});
+    wb.SheetNames.forEach(sn=>{ const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:''}); if(isDataSheet(rows)) addRows(rows, sn); });
+    render();
+  }catch(e){ alert('Could not load sample (serve the page over http, or upload the file manually).'); }
+}
+
+// ---------- helpers ----------
+const isExpl = r => String(r.exploitAvailable).toLowerCase()==='yes';
+const bu = r => r.repository || r.repositoryID || 'unknown';
+const sevOrder = {Critical:4,High:3,Medium:2,Low:1,Info:0};
+function uniqHosts(rows){ return new Set(rows.map(r=>r.ip||r.dnsName)).size; }
+function groupCount(rows, keyfn){ const m={}; rows.forEach(r=>{const k=keyfn(r); m[k]=(m[k]||0)+1}); return m; }
+function fmtNum(n){ return (n||0).toLocaleString(); }
+function daysBetween(a,b){ const da=new Date(a), db=new Date(b); return (db-da)/86400000; }
+
+// ---------- render ----------
+function render(){
+  $('#uploader').classList.add('hidden');
+  const d = $('#dashboard'); d.classList.remove('hidden'); d.innerHTML='';
+  charts.forEach(c=>c.destroy()); charts=[];
+  const cum = STATE.cumulative, mit = STATE.mitigated;
+  const expl = cum.filter(isExpl);
+  const buses = [...new Set([...cum,...mit].map(bu))].sort();
+
+  // host denominators (override-able)
+  const hostsByBu = {}; buses.forEach(b=>{
+    const detected = uniqHosts([...cum,...mit].filter(r=>bu(r)===b));
+    hostsByBu[b] = STATE.hostOverride[b] || detected;
+  });
+  const totalHosts = Object.values(hostsByBu).reduce((a,b)=>a+b,0);
+  const explPerHost = expl.length/Math.max(totalHosts,1);
+  const remRate = mit.length/Math.max(mit.length+cum.length,1)*100;
+
+  // MTTR from mitigated
+  const mttrVals = mit.map(r=> (r.firstSeen&&r.mitigatedDate)? daysBetween(r.firstSeen,r.mitigatedDate):null).filter(v=>v!=null&&v>=0);
+  const mttr = mttrVals.length? mttrVals.reduce((a,b)=>a+b,0)/mttrVals.length : null;
+
+  d.appendChild(html(`
+    <div class="cards">
+      ${kpi('Assets analyzed', fmtNum(totalHosts))}
+      ${kpi('Open findings', fmtNum(cum.length))}
+      ${kpi('Exploitable open', `<span style="color:var(--crit)">${fmtNum(expl.length)}</span>`)}
+      ${kpi('Exploitable / asset', explPerHost.toFixed(3), explPerHost<=SLA?'ok':'over', `SLA ${SLA} · ${Math.round(explPerHost/SLA*100)}% of SLA`)}
+      ${kpi('Mitigated findings', fmtNum(mit.length))}
+      ${kpi('Remediation rate', remRate.toFixed(0)+'%')}
+      ${kpi('Mean time to remediate', mttr!=null? mttr.toFixed(0)+' d':'—')}
+    </div>`));
+
+  // SLA by BU
+  const slaRows = buses.map(b=>{
+    const e = expl.filter(r=>bu(r)===b).length;
+    const h = hostsByBu[b];
+    const ratio = e/Math.max(h,1);
+    return {b, e, h, ratio, over: ratio>SLA,
+      non: cum.filter(r=>bu(r)===b&&!isExpl(r)).length,
+      mitE: mit.filter(r=>bu(r)===b&&isExpl(r)).length};
+  });
+  d.appendChild(html(`<div class="panel"><h3>Exploitable-vulnerability SLA by business unit</h3>
+    <table><thead><tr><th>Business unit</th><th class="num">Assets</th><th class="num">Exploitable open</th>
+    <th class="num">Per asset</th><th class="num">% of SLA</th><th>Status</th><th class="num">Non-exploitable</th>
+    <th class="num">Exploitable mitigated</th></tr></thead><tbody>
+    ${slaRows.map(r=>`<tr><td>${r.b}</td>
+      <td class="num"><input class="hostinput" data-bu="${r.b}" value="${r.h}"></td>
+      <td class="num">${fmtNum(r.e)}</td><td class="num">${r.ratio.toFixed(3)}</td>
+      <td class="num">${Math.round(r.ratio/SLA*100)}%</td>
+      <td><span class="pill ${r.over?'over':'ok'}">${r.over?'Over SLA':'Within SLA'}</span></td>
+      <td class="num">${fmtNum(r.non)}</td><td class="num">${fmtNum(r.mitE)}</td></tr>`).join('')}
+    </tbody></table>
+    <p class="sub noprint">Assets defaults to unique hosts seen in the data — edit any value to your true asset count and the SLA recalculates.</p>
+    </div>`));
+  d.querySelectorAll('.hostinput').forEach(inp=>inp.addEventListener('change',e=>{
+    STATE.hostOverride[e.target.dataset.bu]=parseInt(e.target.value)||0; render();
+  }));
+
+  // charts row: severity + exploitable by BU
+  d.appendChild(html(`<div class="grid2">
+    <div class="panel"><h3>Open findings by severity</h3><div class="chartbox"><canvas id="cSev"></canvas></div></div>
+    <div class="panel"><h3>Exploitable open vs SLA, by BU</h3><div class="chartbox"><canvas id="cBu"></canvas></div></div>
+  </div>`));
+  const sevCount = groupCount(cum, r=>r.severity);
+  donut('cSev', ['Critical','High','Medium','Low','Info'].filter(s=>sevCount[s]),
+        ['Critical','High','Medium','Low','Info'].filter(s=>sevCount[s]).map(s=>sevCount[s]),
+        {Critical:'#e24b4a',High:'#ef9f27',Medium:'#378add',Low:'#888780',Info:'#5a5f6e'});
+  bar('cBu', slaRows.map(r=>r.b), [
+    {label:'Exploitable open', data:slaRows.map(r=>r.e), backgroundColor:'#e24b4a'},
+    {label:'SLA threshold', data:slaRows.map(r=>Math.round(r.h*SLA)), backgroundColor:'#3bb273'}
+  ]);
+
+  // top exploitable vulns
+  const topExpl = topBy(expl, r=>r.pluginName, 10);
+  d.appendChild(html(`<div class="panel"><h3>Top exploitable vulnerabilities (open)</h3>
+    <table><thead><tr><th>Plugin</th><th>Severity</th><th>CVE</th><th>Exploit framework</th>
+    <th class="num">Instances</th><th class="num">Hosts</th></tr></thead><tbody>
+    ${topExpl.map(([name,rows])=>`<tr>
+      <td>${name}</td><td class="sev-${rows[0].severity}">${rows[0].severity}</td>
+      <td style="font-size:12px">${(rows[0].cve||'—')}</td>
+      <td style="font-size:12px">${rows[0].exploitFrameworks||'—'}</td>
+      <td class="num">${rows.length}</td><td class="num">${uniqHosts(rows)}</td></tr>`).join('')}
+    </tbody></table></div>`));
+
+  // OS + cloud
+  d.appendChild(html(`<div class="grid2">
+    <div class="panel"><h3>Exploitable exposure by operating system</h3><div class="chartbox"><canvas id="cOs"></canvas></div></div>
+    <div class="panel"><h3>Exploitable exposure by cloud</h3><div class="chartbox"><canvas id="cCloud"></canvas></div></div>
+  </div>`));
+  const osC = groupCount(expl, r=>r.operatingSystem||'Unknown');
+  const osK = Object.keys(osC).sort((a,b)=>osC[b]-osC[a]);
+  hbar('cOs', osK.map(k=>k.replace('Microsoft ','').replace('Red Hat Enterprise Linux','RHEL')), osK.map(k=>osC[k]), '#4f8cff');
+  const clC = groupCount(expl, r=>r.cloudProvider||'Unknown');
+  donut('cCloud', Object.keys(clC), Object.values(clC), {Azure:'#378add',AWS:'#ef9f27',Unknown:'#5a5f6e'});
+
+  // remediation trend
+  const byMonth = {};
+  mit.forEach(r=>{ if(r.mitigatedDate){ const m=String(r.mitigatedDate).slice(0,7); byMonth[m]=(byMonth[m]||0)+1; }});
+  const months = Object.keys(byMonth).sort();
+  if(months.length){
+    d.appendChild(html(`<div class="panel"><h3>Remediation throughput (mitigated by month)</h3><div class="chartbox"><canvas id="cTrend"></canvas></div></div>`));
+    line('cTrend', months, months.map(m=>byMonth[m]));
+  }
+
+  // most exposed hosts
+  const hostExpl = {};
+  expl.forEach(r=>{ const h=r.dnsName||r.ip; (hostExpl[h]=hostExpl[h]||{n:0,bu:bu(r),os:r.operatingSystem,ip:r.ip}).n++; });
+  const topHosts = Object.entries(hostExpl).sort((a,b)=>b[1].n-a[1].n).slice(0,12);
+  d.appendChild(html(`<div class="panel"><h3>Most-exposed hosts (by exploitable findings)</h3>
+    <table><thead><tr><th>Host</th><th>BU</th><th>OS</th><th>IP</th><th class="num">Exploitable</th></tr></thead><tbody>
+    ${topHosts.map(([h,o])=>`<tr><td>${h}</td><td>${o.bu}</td>
+      <td style="font-size:12px">${(o.os||'').replace('Microsoft ','')}</td><td style="font-size:12px">${o.ip||''}</td>
+      <td class="num">${o.n}</td></tr>`).join('')}
+    </tbody></table></div>`));
+
+  window._slaRows = slaRows; // for CSV export
+}
+
+// ---------- chart helpers ----------
+function donut(id,labels,data,colorMap){
+  const ctx=document.getElementById(id);
+  charts.push(new Chart(ctx,{type:'doughnut',
+    data:{labels,datasets:[{data,backgroundColor:labels.map(l=>colorMap[l]||'#4f8cff'),borderWidth:0}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#9aa3b2'}}}}}));
+}
+function bar(id,labels,datasets){
+  charts.push(new Chart(document.getElementById(id),{type:'bar',data:{labels,datasets},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#9aa3b2'}}},
+      scales:{x:{ticks:{color:'#9aa3b2'},grid:{display:false}},y:{ticks:{color:'#9aa3b2'},grid:{color:'#2a2f3e'}}}}}));
+}
+function hbar(id,labels,data,color){
+  charts.push(new Chart(document.getElementById(id),{type:'bar',
+    data:{labels,datasets:[{data,backgroundColor:color}]},
+    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{ticks:{color:'#9aa3b2'},grid:{color:'#2a2f3e'}},y:{ticks:{color:'#9aa3b2'},grid:{display:false}}}}}));
+}
+function line(id,labels,data){
+  charts.push(new Chart(document.getElementById(id),{type:'line',
+    data:{labels,datasets:[{data,label:'Mitigated',borderColor:'#3bb273',backgroundColor:'rgba(59,178,115,.15)',fill:true,tension:.3}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{ticks:{color:'#9aa3b2'},grid:{display:false}},y:{ticks:{color:'#9aa3b2'},grid:{color:'#2a2f3e'}}}}}));
+}
+function topBy(rows,keyfn,n){
+  const m={}; rows.forEach(r=>{const k=keyfn(r);(m[k]=m[k]||[]).push(r)});
+  return Object.entries(m).sort((a,b)=>b[1].length-a[1].length).slice(0,n);
+}
+function kpi(l,v,cls,sub){ return `<div class="card"><div class="l">${l}</div>
+  <div class="v ${v.length>6?'s':''}">${v}</div>${sub?`<div class="sub" style="color:var(--${cls==='over'?'crit':'ok'})">${sub}</div>`:''}</div>`; }
+function html(s){ const t=document.createElement('template'); t.innerHTML=s.trim(); return t.content.firstChild; }
+
+// ---------- CSV export ----------
+function exportCsv(){
+  if(!window._slaRows) return;
+  const head=['business_unit','assets','exploitable_open','exploitable_per_host','pct_of_sla','status','non_exploitable_open','exploitable_mitigated'];
+  const lines=[head.join(',')];
+  window._slaRows.forEach(r=>lines.push([r.b,r.h,r.e,r.ratio.toFixed(4),Math.round(r.ratio/SLA*100)+'%',
+    r.over?'Over SLA':'Within SLA',r.non,r.mitE].join(',')));
+  const blob=new Blob([lines.join('\n')],{type:'text/csv'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='tenable_sla_summary.csv'; a.click();
+}
+</script>
+</body>
+</html>
