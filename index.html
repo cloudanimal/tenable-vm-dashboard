@@ -39,7 +39,7 @@
     width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;
     color:var(--muted);transition:border-color .2s ease,color .2s ease,transform .2s ease;font-size:15px;line-height:1}
   .theme-toggle:hover{border-color:var(--accent);color:var(--txt);transform:rotate(12deg)}
-  .btn.green{background:var(--ok);color:#fff;border:none}
+  .btn.sample{background:#6b5bd2;color:#fff;border:none}
   .btn.xlsx{background:#217346;color:#fff;border:none}
   .btn:hover{filter:brightness(1.08)}
   .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:14px}
@@ -123,6 +123,10 @@
   </div>
 </header>
 <main>
+  <div id="jumpBar" class="noprint" style="display:none;margin:0 0 14px">
+    <label class="sub" style="display:flex;align-items:center;gap:8px;margin:0">Jump to section
+      <select id="jumpSel" class="hostinput" style="width:auto;padding:8px 10px"></select></label>
+  </div>
   <section id="uploader">
     <div class="drop" id="drop">
       <h2>Load your Tenable SC analysis exports</h2>
@@ -132,7 +136,7 @@
         <button class="btn" id="pickCum">Cumulative (open) CSV</button>
         <button class="btn" id="pickMit">Mitigated CSV</button>
         <button class="btn xlsx" id="pickWb">Workbook (.xlsx)</button>
-        <button class="btn green" id="loadSample">Load sample data</button>
+        <button class="btn sample" id="loadSample">Load sample data</button>
       </div>
       <p id="loadState" class="sub" style="margin-top:12px"></p>
       <p class="sub" style="margin-top:4px;max-width:640px;margin-left:auto;margin-right:auto">
@@ -158,19 +162,32 @@ const SLA = 0.25;                       // exploitable vulns per host
 const $ = s => document.querySelector(s);
 let STATE = { cumulative: [], mitigated: [], hostOverride: {}, topN: 5, summaryN: 5, cbTheme: 'default', topSev: 'all', hostsN: 10, hostsSev: 'all',
   slaDays: { Critical: 30, High: 30, Medium: 30, Low: 30 } };
-const PALS = {
-  default:      {crit:'#e24b4a', high:'#ef9f27', med:'#378add', low:'#888780', info:'#5a5f6e', ok:'#3bb273', accent:'#4f8cff'},
-  deuteranopia: {crit:'#cc3311', high:'#ee7733', med:'#0077bb', low:'#33bbee', info:'#999999', ok:'#009988', accent:'#0077bb'},
-  protanopia:   {crit:'#994455', high:'#ddaa33', med:'#004488', low:'#6699cc', info:'#999999', ok:'#117733', accent:'#004488'},
-  tritanopia:   {crit:'#d81b60', high:'#f57c00', med:'#6a1b9a', low:'#9e9e9e', info:'#bdbdbd', ok:'#00897b', accent:'#d81b60'}
+const PALS_DEFAULT = {crit:'#e24b4a', high:'#ef9f27', med:'#378add', low:'#888780', info:'#5a5f6e', ok:'#3bb273', accent:'#4f8cff'};
+const PALS_CB = {
+  deuteranopia: {
+    dark:  {crit:'#cc3311', high:'#ee7733', med:'#0077bb', low:'#33bbee', info:'#999999', ok:'#009988', accent:'#0077bb'},
+    light: {crit:'#a82a0e', high:'#a85f08', med:'#005a8c', low:'#1a78a8', info:'#5f6670', ok:'#00706a', accent:'#005a8c', bg:'#e9ecf1', panel:'#ffffff'}
+  },
+  protanopia: {
+    dark:  {crit:'#bb5566', high:'#ddaa33', med:'#4f8fcf', low:'#88ccee', info:'#999999', ok:'#44bb99', accent:'#4f8fcf'},
+    light: {crit:'#7a3340', high:'#8f6a13', med:'#003f73', low:'#356699', info:'#5f6670', ok:'#0f663a', accent:'#003f73', bg:'#e9ecf1', panel:'#ffffff'}
+  },
+  tritanopia: {
+    dark:  {crit:'#ee3377', high:'#f57c00', med:'#9a4ec2', low:'#bdbdbd', info:'#d0d0d0', ok:'#19a3a3', accent:'#ee3377'},
+    light: {crit:'#b0144d', high:'#bd5800', med:'#5e1a8a', low:'#6b6b6b', info:'#8a8a8a', ok:'#006b67', accent:'#b0144d', bg:'#f1ecef', panel:'#ffffff'}
+  }
 };
-const PAL = () => PALS[STATE.cbTheme] || PALS.default;
+const curMode = () => document.documentElement.dataset.theme==='light' ? 'light' : 'dark';
+const PAL = () => STATE.cbTheme==='default' ? PALS_DEFAULT : PALS_CB[STATE.cbTheme][curMode()];
 function applyPalette(name){
-  STATE.cbTheme = PALS[name] ? name : 'default'; const p = PAL();
+  STATE.cbTheme = PALS_CB[name] ? name : 'default';
   const root = document.documentElement.style;
-  const keys = {'--crit':p.crit,'--high':p.high,'--med':p.med,'--low':p.low,'--ok':p.ok,'--accent':p.accent};
-  if(STATE.cbTheme==='default'){ Object.keys(keys).forEach(k=>root.removeProperty(k)); }
-  else { Object.entries(keys).forEach(([k,v])=>root.setProperty(k,v)); }
+  ['--crit','--high','--med','--low','--ok','--accent','--bg','--panel'].forEach(k=>root.removeProperty(k));
+  if(STATE.cbTheme!=='default'){ const p=PAL();
+    root.setProperty('--crit',p.crit); root.setProperty('--high',p.high); root.setProperty('--med',p.med);
+    root.setProperty('--low',p.low); root.setProperty('--ok',p.ok); root.setProperty('--accent',p.accent);
+    if(p.bg) root.setProperty('--bg',p.bg); if(p.panel) root.setProperty('--panel',p.panel);
+  }
   try{ localStorage.setItem('tvd-cb', STATE.cbTheme); }catch(e){}
   const sel=document.getElementById('cbSel'); if(sel) sel.value=STATE.cbTheme;
   if(window._report) render();
@@ -192,6 +209,8 @@ $('#fileWb').addEventListener('change', e=>handleFiles(e.target.files));
 $('#loadSample').addEventListener('click', loadSample);
 $('#reset').addEventListener('click', ()=>location.reload());
 $('#exportBtn').addEventListener('click', ()=>doExport($('#exportSel').value));
+$('#jumpSel').addEventListener('change', e=>{ if(e.target.value){ const el=document.getElementById(e.target.value);
+  if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); e.target.value=''; } });
 $('#cbSel').addEventListener('change', e=>applyPalette(e.target.value));
 applyPalette((function(){ try{ return localStorage.getItem('tvd-cb'); }catch(e){ return null; } })() || 'default');
 $('#cfgSla').addEventListener('click', ()=>{ const el=document.getElementById('slaConfig');
@@ -200,10 +219,9 @@ $('#cfgSla').addEventListener('click', ()=>{ const el=document.getElementById('s
 const themeBtn=$('#themeBtn');
 function applyTheme(t){ document.documentElement.dataset.theme=t; try{localStorage.setItem('tvd-theme',t);}catch(e){}
   themeBtn.title = t==='dark'?'Switch to light mode':'Switch to dark mode';
-  themeBtn.setAttribute('aria-label', themeBtn.title); if(window._report) render(); }
+  themeBtn.setAttribute('aria-label', themeBtn.title); applyPalette(STATE.cbTheme); }
 themeBtn.addEventListener('click', ()=>applyTheme(document.documentElement.dataset.theme==='light'?'dark':'light'));
-applyTheme((function(){ try{ const s=localStorage.getItem('tvd-theme'); if(s) return s; }catch(e){}
-  return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; })());
+applyTheme((function(){ try{ const s=localStorage.getItem('tvd-theme'); if(s) return s; }catch(e){} return 'dark'; })());
 function tc(){ return getComputedStyle(document.documentElement).getPropertyValue('--muted').trim()||'#9aa3b2'; }
 function gc(){ return document.documentElement.dataset.theme==='light'?'rgba(0,0,0,.10)':'#2a2f3e'; }
 function setState(){ const s=$('#loadState'); if(s) s.textContent =
@@ -333,7 +351,8 @@ function render(){
     cum.forEach(r=>{ if(pastSla(r)){ c.total++; if(c[r.severity]!=null) c[r.severity]++; if(isExpl(r)) c.expl++; } }); return c; };
   const slaCard = (label,id,col,tip) => `<div class="card"${tip?` title="${tip}"`:''}><div class="l">${label}</div><div class="v" id="${id}" style="color:${col}">0</div></div>`;
   d.appendChild(html(`<div class="panel" id="slaConfig"><h3>Vulnerabilities past remediation SLA</h3>
-    <p class="sub">Aging measured from vulnerability publish date (vulnPubDate). <b style="color:var(--accent)">Edit the day values below</b> to set your remediation SLA per severity — every metric recalculates instantly:</p>
+    <p class="sub">Aging measured from vulnerability publish date (vulnPubDate).</p>
+    <p class="sub"><b style="color:var(--accent)">Edit the day values below</b> to set your remediation SLA per severity — every metric recalculates instantly:</p>
     <div class="noprint" style="display:flex;flex-wrap:wrap;gap:16px;margin:10px 0 2px;align-items:center">
       ${sevList.map(s=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px"><span class="sev-${s}">${s}</span>
         <input class="slainp" data-sev="${s}" type="number" min="0" value="${STATE.slaDays[s]}" style="width:62px"> days</label>`).join('')}
@@ -351,7 +370,7 @@ function render(){
       ${slaCard('Avg Past Low SLA','sla-avg-Low','var(--low)','Low findings past SLA ÷ unique IPs.')}
     </div></div>`));
   const uniqIp = new Set([...cum,...mit].map(r=>r.ip).filter(Boolean)).size;
-  let summaryRefresh = null;
+  let summaryRefresh = null, topRefresh = null;
   const fillSla = () => { const c=slaCounts(); document.getElementById('sla-total').textContent=fmtNum(c.total);
     sevList.forEach(s=>document.getElementById('sla-'+s).textContent=fmtNum(c[s]));
     sevList.forEach(s=>{ const el=document.getElementById('sla-avg-'+s); if(el) el.textContent=(uniqIp? c[s]/uniqIp : 0).toFixed(3); });
@@ -360,15 +379,12 @@ function render(){
     const kp=document.getElementById('kpiPastPer'), ks=document.getElementById('kpiPastSub');
     if(kp){ const col=ep>SLA?'var(--crit)':'var(--ok)'; kp.textContent=ep.toFixed(3); kp.style.color=col;
       ks.textContent=`SLA ${SLA} · ${Math.round(ep/SLA*100)}% of SLA`; ks.style.color=col; }
-    if(summaryRefresh) summaryRefresh(); };
+    if(summaryRefresh) summaryRefresh(); if(topRefresh) topRefresh(); };
   fillSla();
   d.querySelectorAll('.slainp').forEach(inp=>inp.addEventListener('input',e=>{
     const v=parseInt(e.target.value); STATE.slaDays[e.target.dataset.sev]= isNaN(v)?0:Math.max(0,v); fillSla(); }));
 
   // vulnerability summary by segment: plugins (rows) x segments (columns), open finding counts
-  d.appendChild(html(`<div class="panel"><h3>Exploitable-vulnerability SLA by segment</h3>
-    <p class="sub noprint">Placeholder — to be built here. The editable what-if version is "KPI - Exploitable-vulnerability SLA by segment" near the bottom of the page.</p></div>`));
-
   const segShort = s => String(s).replace(/_Repo$/,'');
   const sevRank = {Critical:4,High:3,Medium:2,Low:1,Info:0};
   let pRows = [];
@@ -409,24 +425,23 @@ function render(){
   // charts row: severity + exploitable by BU
   d.appendChild(html(`<div class="grid2">
     <div class="panel"><h3>Open findings by severity</h3><div class="chartbox"><canvas id="cSev"></canvas></div></div>
-    <div class="panel"><h3>Exploitable open vs SLA, by segment</h3><div class="chartbox"><canvas id="cBu"></canvas></div></div>
+    <div class="panel"><h3>Exploitable vulnerabilities by SLA, and segment</h3><div class="chartbox"><canvas id="cBu"></canvas></div></div>
   </div>`));
   const sevCount = groupCount(cum, r=>r.severity);
   donut('cSev', ['Critical','High','Medium','Low','Info'].filter(s=>sevCount[s]),
         ['Critical','High','Medium','Low','Info'].filter(s=>sevCount[s]).map(s=>sevCount[s]),
         {Critical:PAL().crit,High:PAL().high,Medium:PAL().med,Low:PAL().low,Info:PAL().info});
   bar('cBu', slaRows.map(r=>r.b), [
-    {label:'Exploitable open', data:slaRows.map(r=>r.e), backgroundColor:PAL().crit},
+    {label:'Past SLA', data:slaRows.map(r=>r.e), backgroundColor:PAL().crit},
     {label:'SLA threshold', data:slaRows.map(r=>Math.round(r.h*SLA)), backgroundColor:PAL().ok}
   ]);
 
   // top exploitable vulns (adjustable count, default 5) — updates in place, no full re-render
-  const distinctExpl = new Set(expl.map(r=>r.pluginName)).size;
-  const maxN = Math.max(distinctExpl,1);
+  const maxN = Math.max(new Set(cum.map(r=>r.pluginName)).size,1);
   const topLabel = v => v>=maxN ? 'ALL' : v;
   d.appendChild(html(`<div class="panel">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-      <h3 style="margin:0">Top exploitable vulnerabilities</h3>
+      <h3 style="margin:0">Top vulnerabilities past SLA</h3>
       <label class="sub noprint" style="display:flex;align-items:center;gap:10px">
         <select id="topSev" class="hostinput" style="width:auto;text-align:left" title="Filter by Tenable severity">
           <option value="all">All severities</option>
@@ -439,13 +454,14 @@ function render(){
         <input id="topN" type="range" min="1" max="${maxN}" value="${Math.min(STATE.topN,maxN)}"
           style="width:130px;accent-color:var(--accent)">
         <span id="topNval" style="color:var(--txt);font-weight:500;min-width:2.2em;text-align:right">${topLabel(Math.min(STATE.topN,maxN))}</span>
-        <span id="topExplOf" style="color:var(--muted)">of ${distinctExpl}</span></label>
+        <span id="topExplOf" style="color:var(--muted)">of ${new Set(cum.filter(pastSla).map(r=>r.pluginName)).size}</span></label>
     </div>
     <div id="topExplWrap" class="scrollwrap" style="margin-top:12px">
     <table><thead><tr><th>#</th><th>Plugin</th><th>Severity</th><th>CVE</th><th>Exploit framework</th>
     <th class="num">Instances</th><th class="num">Hosts</th></tr></thead><tbody id="topExplBody"></tbody></table></div></div>`));
   function fillTopExpl(){
-    const src = STATE.topSev==='all' ? EXPL : EXPL.filter(r=>r.severity===STATE.topSev);
+    const base = cum.filter(pastSla);
+    const src = STATE.topSev==='all' ? base : base.filter(r=>r.severity===STATE.topSev);
     const distinct = new Set(src.map(r=>r.pluginName)).size;
     const ofEl=document.getElementById('topExplOf'); if(ofEl) ofEl.textContent='of '+distinct;
     const t = topBy(src, r=>r.pluginName, STATE.topN);
@@ -461,6 +477,7 @@ function render(){
     else wrap.style.maxHeight='';
   }
   fillTopExpl();
+  topRefresh = fillTopExpl;
   d.querySelector('#topN').addEventListener('input', e=>{
     const v = Math.max(1, Math.min(parseInt(e.target.value)||1, maxN));
     STATE.topN = v; d.querySelector('#topNval').textContent = topLabel(v); fillTopExpl();
@@ -605,6 +622,8 @@ function render(){
     wrap.appendChild(sel); wrap.appendChild(b); p.appendChild(wrap);
   });
 
+  buildJumpNav();
+
   window._report = {
     sla: slaRows,
     metrics: { totalHosts, openFindings: cum.length, exploitableOpen: expl.length,
@@ -743,6 +762,14 @@ function topBy(rows,keyfn,n){
 function kpi(l,v,cls,sub,tip){ const txt=String(v).replace(/<[^>]*>/g,''); return `<div class="card"${tip?` title="${tip}"`:''}><div class="l">${l}</div>
   <div class="v ${txt.length>6?'s':''}">${v}</div>${sub?`<div class="sub" style="color:var(--${cls==='over'?'crit':'ok'})">${sub}</div>`:''}</div>`; }
 function html(s){ const t=document.createElement('template'); t.innerHTML=s.trim(); return t.content.firstChild; }
+function buildJumpNav(){
+  const sel=document.getElementById('jumpSel'), bar=document.getElementById('jumpBar'), dash=document.getElementById('dashboard');
+  if(!sel||!dash) return;
+  const panels=[...dash.querySelectorAll('.panel')];
+  panels.forEach((p,i)=>{ if(!p.id) p.id='sec-'+i; });
+  sel.innerHTML='<option value="">Jump to section…</option>'+panels.map(p=>{ const h=p.querySelector('h3'); return `<option value="${p.id}">${h?h.textContent:p.id}</option>`; }).join('');
+  if(bar) bar.style.display = panels.length ? 'block' : 'none';
+}
 
 </script>
 </body>
