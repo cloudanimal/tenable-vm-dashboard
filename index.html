@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Tenable VM Dashboard — local, in-browser</title>
+<title>Tenable Vulnerability Dashboard — local, in-browser</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
@@ -41,12 +41,18 @@
   .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:14px}
   .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:14px;margin:22px 0}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
-  .card .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .card{display:flex;flex-direction:column}
+  .card .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;min-height:2.6em;line-height:1.3}
   .card .v{font-size:26px;font-weight:700;margin-top:6px}
-  .card .v.s{font-size:18px}
+  .card .v.s{font-size:26px}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
   @media(max-width:820px){.grid2{grid-template-columns:1fr}}
-  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin:18px 0}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin:18px 0;position:relative}
+  .savewrap{position:absolute;top:12px;right:14px;display:flex;align-items:center;gap:6px;z-index:5}
+  .savewrap select,.savewrap button{font-size:11px;padding:4px 8px;border-radius:6px;
+    background:var(--panel2);border:1px solid var(--line);color:var(--txt);cursor:pointer}
+  .savewrap button:hover{border-color:var(--accent)}
+  .panel > h3{padding-right:150px}
   .panel h3{margin:0 0 14px;font-size:15px;font-weight:600}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
@@ -59,8 +65,14 @@
   .sev-High{color:var(--high);font-weight:600}
   .sev-Medium{color:var(--med)} .sev-Low{color:var(--low)}
   .chartbox{position:relative;height:260px}
-  .hostinput{width:64px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+  .hostinput,.slainp{width:64px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
     border-radius:6px;padding:4px 6px;font-size:13px;text-align:right}
+  .wif{width:78px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:6px;padding:4px 6px;font-size:13px;text-align:right}
+  .wif:focus{border-color:var(--accent);outline:none}
+  .scrollwrap{overflow:auto;border:0.5px solid var(--line);border-radius:8px}
+  .scrollwrap table{margin:0}
+  .scrollwrap thead th{position:sticky;top:0;background:var(--panel);z-index:1}
   .hidden{display:none}
   .foot{color:var(--muted);font-size:12px;margin:30px 0 10px;text-align:center}
   a{color:var(--accent)}
@@ -75,13 +87,15 @@
 <body>
 <header>
   <div>
-    <h1>Tenable VM Dashboard</h1>
+    <h1>Tenable Vulnerability Dashboard</h1>
     <div class="sub">Upload your Tenable SC exports → instant vulnerability reports</div>
   </div>
   <div class="row noprint">
     <span class="priv">&#128274; 100% local — your data never leaves this browser</span>
+    <button class="btn ghost" id="cfgSla">Configure SLAs</button>
     <button class="btn ghost" id="themeBtn">Light mode</button>
     <select id="exportSel" class="hostinput" style="width:auto;padding:8px 10px">
+      <option value="report-html">Full report (HTML)</option>
       <option value="report-pdf">Full report (PDF / print)</option>
       <option value="exec-md">Executive report (Markdown)</option>
       <option value="sla-csv">SLA summary (CSV)</option>
@@ -132,8 +146,10 @@
 <script>
 const SLA = 0.25;                       // exploitable vulns per host
 const $ = s => document.querySelector(s);
-let STATE = { cumulative: [], mitigated: [], hostOverride: {}, topN: 5 };
+let STATE = { cumulative: [], mitigated: [], hostOverride: {}, topN: 5, summaryN: 5,
+  slaDays: { Critical: 30, High: 30, Medium: 30, Low: 30 } };
 let charts = [];
+let EXPL = [];
 
 // ---------- ingest ----------
 const drop = $('#drop');
@@ -149,6 +165,9 @@ $('#fileWb').addEventListener('change', e=>handleFiles(e.target.files));
 $('#loadSample').addEventListener('click', loadSample);
 $('#reset').addEventListener('click', ()=>location.reload());
 $('#exportBtn').addEventListener('click', ()=>doExport($('#exportSel').value));
+$('#cfgSla').addEventListener('click', ()=>{ const el=document.getElementById('slaConfig');
+  if(el){ el.scrollIntoView({behavior:'smooth',block:'start'}); const inp=el.querySelector('.slainp'); if(inp) setTimeout(()=>inp.focus(),300); }
+  else alert('Load your Tenable data first to configure SLAs.'); });
 const themeBtn=$('#themeBtn');
 function applyTheme(t){ document.documentElement.dataset.theme=t; try{localStorage.setItem('tvd-theme',t);}catch(e){}
   themeBtn.textContent = t==='dark'?'Light mode':'Dark mode'; if(window._report) render(); }
@@ -224,7 +243,7 @@ function render(){
   const d = $('#dashboard'); d.classList.remove('hidden'); d.innerHTML='';
   charts.forEach(c=>c.destroy()); charts=[];
   const cum = STATE.cumulative, mit = STATE.mitigated;
-  const expl = cum.filter(isExpl);
+  const expl = cum.filter(isExpl); EXPL = expl;
   const buses = [...new Set([...cum,...mit].map(bu))].sort();
 
   // host denominators (override-able)
@@ -243,23 +262,28 @@ function render(){
   // vulnerabilities published more than 1 year ago (by vuln publication date)
   const oneYrAgo = Date.now() - 365*86400000;
   const oldPub = cum.filter(r=> r.vulnPubDate && new Date(r.vulnPubDate).getTime() < oneYrAgo).length;
+  // findings first detected (firstSeen) more than 1 year ago
+  const oldSeen = cum.filter(r=> r.firstSeen && new Date(r.firstSeen).getTime() < oneYrAgo).length;
   // findings referencing Log4j (plugin name / synopsis / description / cve / output)
   const log4j = cum.filter(r=> /log4j/i.test([r.pluginName,r.synopsis,r.description,r.cve,r.pluginText].join(' '))).length;
 
   d.appendChild(html(`
     <div class="cards">
       ${kpi('Assets analyzed', fmtNum(totalHosts))}
-      ${kpi('Open findings', fmtNum(cum.length))}
-      ${kpi('Exploitable open', `<span style="color:var(--crit)">${fmtNum(expl.length)}</span>`)}
-      ${kpi('Exploitable / asset', explPerHost.toFixed(3), explPerHost<=SLA?'ok':'over', `SLA ${SLA} · ${Math.round(explPerHost/SLA*100)}% of SLA`)}
+      ${kpi('Total Vulnerabilities', fmtNum(cum.length))}
+      ${kpi('Total Exploitable', `<span style="color:var(--crit)">${fmtNum(expl.length)}</span>`)}
+      <div class="card"><div class="l">Past SLA</div>
+        <div class="v" id="kpiPastPer">0.000</div>
+        <div class="sub" id="kpiPastSub" style="color:var(--ok)">SLA ${SLA}</div></div>
       ${kpi('Published &gt; 1 yr ago', fmtNum(oldPub))}
-      ${kpi('Log4j-related', `<span style="color:var(--crit)">${fmtNum(log4j)}</span>`)}
+      ${kpi('1st seen &gt; 1 yr ago', fmtNum(oldSeen))}
+      ${kpi('Log4j', `<span style="color:var(--crit)">${fmtNum(log4j)}</span>`)}
       ${kpi('Mitigated findings', fmtNum(mit.length))}
       ${kpi('Remediation rate', remRate.toFixed(0)+'%')}
       ${kpi('Mean time to remediate', mttr!=null? mttr.toFixed(0)+' d':'—')}
     </div>`));
 
-  // SLA by BU
+  // (Exploitable-vulnerability SLA by segment is built at the end — see buildSlaSegment)
   const slaRows = buses.map(b=>{
     const e = expl.filter(r=>bu(r)===b).length;
     const h = hostsByBu[b];
@@ -268,22 +292,74 @@ function render(){
       non: cum.filter(r=>bu(r)===b&&!isExpl(r)).length,
       mitE: mit.filter(r=>bu(r)===b&&isExpl(r)).length};
   });
-  d.appendChild(html(`<div class="panel"><h3>Exploitable-vulnerability SLA by segment</h3>
-    <table><thead><tr><th>Segment</th><th class="num">Assets</th><th class="num">Exploitable open</th>
-    <th class="num">Per asset</th><th class="num">% of SLA</th><th>Status</th><th class="num">Non-exploitable</th>
-    <th class="num">Exploitable mitigated</th></tr></thead><tbody>
-    ${slaRows.map(r=>`<tr><td>${r.b}</td>
-      <td class="num"><input class="hostinput" data-bu="${r.b}" value="${r.h}"></td>
-      <td class="num">${fmtNum(r.e)}</td><td class="num">${r.ratio.toFixed(3)}</td>
-      <td class="num">${Math.round(r.ratio/SLA*100)}%</td>
-      <td><span class="pill ${r.over?'over':'ok'}">${r.over?'Over SLA':'Within SLA'}</span></td>
-      <td class="num">${fmtNum(r.non)}</td><td class="num">${fmtNum(r.mitE)}</td></tr>`).join('')}
-    </tbody></table>
-    <p class="sub noprint">Assets defaults to unique hosts seen in the data — edit any value to your true asset count and the SLA recalculates.</p>
-    </div>`));
-  d.querySelectorAll('.hostinput').forEach(inp=>inp.addEventListener('change',e=>{
-    STATE.hostOverride[e.target.dataset.bu]=parseInt(e.target.value)||0; render();
-  }));
+
+  // vulnerabilities past remediation SLA (aging from vulnPubDate; editable day targets per severity)
+  const sevList = ['Critical','High','Medium','Low'];
+  const pastSla = r => { const sd=STATE.slaDays[r.severity]; if(sd==null||!r.vulnPubDate) return false;
+    return (Date.now()-new Date(r.vulnPubDate).getTime())/86400000 > sd; };
+  const slaCounts = () => { const c={total:0,Critical:0,High:0,Medium:0,Low:0,expl:0};
+    cum.forEach(r=>{ if(pastSla(r)){ c.total++; if(c[r.severity]!=null) c[r.severity]++; if(isExpl(r)) c.expl++; } }); return c; };
+  const slaCard = (label,id,col) => `<div class="card"><div class="l">${label}</div><div class="v" id="${id}" style="color:${col}">0</div></div>`;
+  d.appendChild(html(`<div class="panel" id="slaConfig"><h3>Vulnerabilities past remediation SLA</h3>
+    <p class="sub">Aging measured from vulnerability publish date (vulnPubDate). Set the days-to-remediate target per severity:</p>
+    <div class="noprint" style="display:flex;flex-wrap:wrap;gap:16px;margin:10px 0 2px;align-items:center">
+      ${sevList.map(s=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px"><span class="sev-${s}">${s}</span>
+        <input class="slainp" data-sev="${s}" type="number" min="0" value="${STATE.slaDays[s]}" style="width:62px"> days</label>`).join('')}
+    </div>
+    <div class="cards" style="margin:14px 0 0;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+      ${slaCard('Total past SLA','sla-total','var(--crit)')}
+      ${slaCard('Critical past SLA','sla-Critical','var(--crit)')}
+      ${slaCard('High past SLA','sla-High','var(--high)')}
+      ${slaCard('Medium past SLA','sla-Medium','var(--med)')}
+      ${slaCard('Low past SLA','sla-Low','var(--low)')}
+      ${slaCard('Past SLA','sla-expl-per','var(--txt)')}
+    </div></div>`));
+  const uniqIp = new Set([...cum,...mit].map(r=>r.ip).filter(Boolean)).size;
+  const fillSla = () => { const c=slaCounts(); document.getElementById('sla-total').textContent=fmtNum(c.total);
+    sevList.forEach(s=>document.getElementById('sla-'+s).textContent=fmtNum(c[s]));
+    const ep = uniqIp? c.expl/uniqIp : 0; const epEl=document.getElementById('sla-expl-per');
+    epEl.textContent=ep.toFixed(3); epEl.style.color = ep>SLA?'var(--crit)':'var(--ok)';
+    const kp=document.getElementById('kpiPastPer'), ks=document.getElementById('kpiPastSub');
+    if(kp){ const col=ep>SLA?'var(--crit)':'var(--ok)'; kp.textContent=ep.toFixed(3); kp.style.color=col;
+      ks.textContent=`SLA ${SLA} · ${Math.round(ep/SLA*100)}% of SLA`; ks.style.color=col; } };
+  fillSla();
+  d.querySelectorAll('.slainp').forEach(inp=>inp.addEventListener('input',e=>{
+    const v=parseInt(e.target.value); STATE.slaDays[e.target.dataset.sev]= isNaN(v)?0:Math.max(0,v); fillSla(); }));
+
+  // vulnerability summary by segment: plugins (rows) x segments (columns), open finding counts
+  const segShort = s => String(s).replace(/_Repo$/,'');
+  const sevRank = {Critical:4,High:3,Medium:2,Low:1,Info:0};
+  const pmap = {};
+  cum.forEach(r=>{ const p=r.pluginName||'(unknown)'; (pmap[p]=pmap[p]||{sev:r.severity,total:0,by:{}});
+    pmap[p].by[bu(r)]=(pmap[p].by[bu(r)]||0)+1; pmap[p].total++; });
+  const pRows = Object.entries(pmap).sort((a,b)=> (sevRank[b[1].sev]||0)-(sevRank[a[1].sev]||0) || b[1].total-a[1].total);
+  const plugRow = ([name,o])=>`<tr><td>${name}</td><td class="sev-${o.sev}">${o.sev}</td>
+    ${buses.map(b=>`<td class="num">${o.by[b]?fmtNum(o.by[b]):'<span style="color:var(--muted)">—</span>'}</td>`).join('')}
+    <td class="num" style="font-weight:600">${fmtNum(o.total)}</td></tr>`;
+  const sMax = Math.max(pRows.length,1); const sLabel = v=>v>=sMax?'ALL':v;
+  d.appendChild(html(`<div class="panel">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <h3 style="margin:0">Vulnerability summary by segment</h3>
+      <label class="sub noprint" style="display:flex;align-items:center;gap:10px">Show top
+        <input id="sumN" type="range" min="1" max="${sMax}" value="${Math.min(STATE.summaryN,sMax)}" style="width:150px;accent-color:var(--accent)">
+        <span id="sumNval" style="color:var(--txt);font-weight:500;min-width:2.2em;text-align:right">${sLabel(Math.min(STATE.summaryN,sMax))}</span>
+        <span style="color:var(--muted)">of ${pRows.length}</span></label>
+    </div>
+    <div class="scrollwrap" style="margin-top:12px;max-height:440px">
+    <table><thead><tr><th>Plugin</th><th>Severity</th>
+      ${buses.map(b=>`<th class="num">${segShort(b)}</th>`).join('')}<th class="num">Total</th></tr></thead>
+    <tbody id="summaryBody"></tbody></table></div>
+    <p class="sub noprint">Open-vulnerability finding counts per Tenable plugin across segments (sorted by severity, then volume).</p></div>`));
+  const fillSummary = ()=>{ const n=Math.min(STATE.summaryN,sMax); const vis=pRows.slice(0,n);
+    const segTot={}; buses.forEach(b=>segTot[b]=0); let grand=0;
+    vis.forEach(([name,o])=>{ buses.forEach(b=>segTot[b]+=(o.by[b]||0)); grand+=o.total; });
+    const totals=`<tr style="border-top:2px solid var(--line)"><td style="font-weight:600">All plugins</td><td></td>
+      ${buses.map(b=>`<td class="num" style="font-weight:600">${fmtNum(segTot[b])}</td>`).join('')}
+      <td class="num" style="font-weight:600">${fmtNum(grand)}</td></tr>`;
+    document.getElementById('summaryBody').innerHTML = vis.map(plugRow).join('') + totals; };
+  fillSummary();
+  document.getElementById('sumN').addEventListener('input',e=>{ const v=Math.max(1,Math.min(parseInt(e.target.value)||1,sMax));
+    STATE.summaryN=v; document.getElementById('sumNval').textContent=sLabel(v); fillSummary(); });
 
   // charts row: severity + exploitable by BU
   d.appendChild(html(`<div class="grid2">
@@ -299,34 +375,58 @@ function render(){
     {label:'SLA threshold', data:slaRows.map(r=>Math.round(r.h*SLA)), backgroundColor:'#3bb273'}
   ]);
 
-  // top exploitable vulns (adjustable count, default 5)
-  const topExpl = topBy(expl, r=>r.pluginName, STATE.topN);
+  // top exploitable vulns (adjustable count, default 5) — updates in place, no full re-render
+  const distinctExpl = new Set(expl.map(r=>r.pluginName)).size;
+  const maxN = Math.max(distinctExpl,1);
+  const topLabel = v => v>=maxN ? 'ALL' : v;
   d.appendChild(html(`<div class="panel">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
       <h3 style="margin:0">Top exploitable vulnerabilities (open)</h3>
-      <label class="sub noprint" style="display:flex;align-items:center;gap:6px">Show top
-        <input id="topN" class="hostinput" type="number" min="1" max="50" value="${STATE.topN}" style="width:56px"></label>
+      <label class="sub noprint" style="display:flex;align-items:center;gap:10px">Show top
+        <input id="topN" type="range" min="1" max="${maxN}" value="${Math.min(STATE.topN,maxN)}"
+          style="width:150px;accent-color:var(--accent)">
+        <span id="topNval" style="color:var(--txt);font-weight:500;min-width:2.2em;text-align:right">${topLabel(Math.min(STATE.topN,maxN))}</span>
+        <span style="color:var(--muted)">of ${distinctExpl}</span></label>
     </div>
-    <table style="margin-top:12px"><thead><tr><th>#</th><th>Plugin</th><th>Severity</th><th>CVE</th><th>Exploit framework</th>
-    <th class="num">Instances</th><th class="num">Hosts</th></tr></thead><tbody>
-    ${topExpl.map(([name,rows],i)=>`<tr>
+    <div id="topExplWrap" class="scrollwrap" style="margin-top:12px">
+    <table><thead><tr><th>#</th><th>Plugin</th><th>Severity</th><th>CVE</th><th>Exploit framework</th>
+    <th class="num">Instances</th><th class="num">Hosts</th></tr></thead><tbody id="topExplBody"></tbody></table></div></div>`));
+  function fillTopExpl(){
+    const t = topBy(EXPL, r=>r.pluginName, STATE.topN);
+    d.querySelector('#topExplBody').innerHTML = t.map(([name,rows],i)=>`<tr>
       <td>${i+1}</td><td>${name}</td><td class="sev-${rows[0].severity}">${rows[0].severity}</td>
       <td style="font-size:12px">${(rows[0].cve||'—')}</td>
       <td style="font-size:12px">${rows[0].exploitFrameworks||'—'}</td>
-      <td class="num">${fmtNum(rows.length)}</td><td class="num">${fmtNum(uniqHosts(rows))}</td></tr>`).join('')}
-    </tbody></table></div>`));
-  d.querySelector('#topN').addEventListener('change', e=>{ STATE.topN=Math.max(1,Math.min(50,parseInt(e.target.value)||5)); render(); });
+      <td class="num">${fmtNum(rows.length)}</td><td class="num">${fmtNum(uniqHosts(rows))}</td></tr>`).join('');
+    // limit the visible viewport to ~5 rows; scroll for the rest
+    const wrap=document.getElementById('topExplWrap'), tb=document.getElementById('topExplBody'), rs=tb.querySelectorAll('tr');
+    if(rs.length>5){ const th=wrap.querySelector('thead'); let h=th?th.offsetHeight:0;
+      for(let i=0;i<5;i++) h+=rs[i].offsetHeight; wrap.style.maxHeight=(h+2)+'px'; }
+    else wrap.style.maxHeight='';
+  }
+  fillTopExpl();
+  d.querySelector('#topN').addEventListener('input', e=>{
+    const v = Math.max(1, Math.min(parseInt(e.target.value)||1, maxN));
+    STATE.topN = v; d.querySelector('#topNval').textContent = topLabel(v); fillTopExpl();
+  });
 
-  // OS + cloud
-  d.appendChild(html(`<div class="grid2">
-    <div class="panel"><h3>Exploitable exposure by operating system</h3><div class="chartbox"><canvas id="cOs"></canvas></div></div>
-    <div class="panel"><h3>Exploitable exposure by cloud</h3><div class="chartbox"><canvas id="cCloud"></canvas></div></div>
-  </div>`));
-  const osC = groupCount(expl, r=>r.operatingSystem||'Unknown');
-  const osK = Object.keys(osC).sort((a,b)=>osC[b]-osC[a]);
-  hbar('cOs', osK.map(k=>k.replace('Microsoft ','').replace('Red Hat Enterprise Linux','RHEL')), osK.map(k=>osC[k]), '#4f8cff');
-  const clC = groupCount(expl, r=>r.cloudProvider||'Unknown');
-  donut('cCloud', Object.keys(clC), Object.values(clC), {Azure:'#378add',AWS:'#ef9f27',Unknown:'#5a5f6e'});
+  // vulnerabilities by OS, stacked by SLA status (within SLA + past-SLA by severity)
+  const osTot={}; cum.forEach(r=>{ const o=r.operatingSystem||'Unknown'; osTot[o]=(osTot[o]||0)+1; });
+  const osOrder=Object.keys(osTot).sort((a,b)=>osTot[b]-osTot[a]);
+  const osCat={within:{},Critical:{},High:{},Medium:{},Low:{}};
+  cum.forEach(r=>{ const o=r.operatingSystem||'Unknown';
+    if(!pastSla(r)) osCat.within[o]=(osCat.within[o]||0)+1;
+    else if(osCat[r.severity]) osCat[r.severity][o]=(osCat[r.severity][o]||0)+1; });
+  const osShort=k=>k.replace('Microsoft ','').replace('Red Hat Enterprise Linux','RHEL');
+  const osSeries=[['Within SLA','within','#3bb273'],['Critical past SLA','Critical','#e24b4a'],
+    ['High past SLA','High','#ef9f27'],['Medium past SLA','Medium','#378add'],['Low past SLA','Low','#888780']];
+  d.appendChild(html(`<div class="panel"><h3>Vulnerabilities by operating system and SLA status</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;margin:0 0 8px;font-size:12px;color:var(--muted)">
+      ${osSeries.map(([l,,c])=>`<span style="display:flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:${c}"></span>${l}</span>`).join('')}
+    </div>
+    <div class="chartbox" style="height:330px"><canvas id="cOs"></canvas></div></div>`));
+  stackedHBar('cOs', osOrder.map(osShort),
+    osSeries.map(([l,k,c])=>({label:l, data:osOrder.map(o=>osCat[k][o]||0), backgroundColor:c})));
 
   // remediation trend
   const byMonth = {};
@@ -348,18 +448,103 @@ function render(){
       <td class="num">${o.n}</td></tr>`).join('')}
     </tbody></table></div>`));
 
+  // Exploitable-vulnerability SLA by segment (moved to end) — heat-mapped what-if table
+  const wifInput = (i,k,v)=>`<input class="wif" data-i="${i}" data-k="${k}" value="${v}">`;
+  d.appendChild(html(`<div class="panel">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <h3 style="margin:0">Exploitable-vulnerability SLA by segment</h3>
+      <button id="slaReset" class="noprint" style="font-size:12px;padding:5px 11px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);cursor:pointer">Reset values</button>
+    </div>
+    <table style="margin-top:12px"><thead><tr><th>Segment</th><th class="num">Assets</th><th class="num">Exploitable open</th>
+    <th class="num">Per asset</th><th class="num">% of SLA</th><th>Status</th><th class="num">Non-exploitable</th>
+    <th class="num">Exploitable mitigated</th></tr></thead><tbody>
+    <tr style="border-bottom:2px solid var(--line)"><td style="font-weight:600">ALL</td>
+      <td class="num">${wifInput('T','h','')}</td>
+      <td class="num">${wifInput('T','e','')}</td>
+      <td class="num" id="sla-per-T"></td><td class="num" id="sla-pct-T"></td><td id="sla-st-T"></td>
+      <td class="num">${wifInput('T','non','')}</td>
+      <td class="num">${wifInput('T','mitE','')}</td></tr>
+    ${slaRows.map((r,i)=>`<tr><td>${r.b}</td>
+      <td class="num">${wifInput(i,'h',r.h)}</td>
+      <td class="num">${wifInput(i,'e',r.e)}</td>
+      <td class="num" id="sla-per-${i}">${r.ratio.toFixed(3)}</td>
+      <td class="num" id="sla-pct-${i}">${Math.round(r.ratio/SLA*100)}%</td>
+      <td id="sla-st-${i}"><span class="pill ${r.over?'over':'ok'}">${r.over?'Over SLA':'Within SLA'}</span></td>
+      <td class="num">${wifInput(i,'non',r.non)}</td>
+      <td class="num">${wifInput(i,'mitE',r.mitE)}</td></tr>`).join('')}
+    </tbody></table>
+    <p class="sub noprint">Heat-mapped what-if: Per asset and % of SLA cells shade green→red by SLA pressure. Edit Assets, Exploitable open, Non-exploitable or Exploitable mitigated to recalculate live. "Reset values" restores the data.</p>
+    </div>`));
+  const slaOrig = slaRows.map(r=>({h:r.h,e:r.e,non:r.non,mitE:r.mitE}));
+  const wifVal = (i,k)=>{ const el=d.querySelector(`.wif[data-i="${i}"][data-k="${k}"]`); const v=parseFloat(el.value); return isNaN(v)?0:v; };
+  const setVal = (i,k,v)=>{ const el=d.querySelector(`.wif[data-i="${i}"][data-k="${k}"]`); if(el) el.value=v; };
+  const statusHTML = over=>`<span class="pill ${over?'over':'ok'}">${over?'Over SLA':'Within SLA'}</span>`;
+  const heat = ratio => { const t=Math.max(0,Math.min(ratio/1.5,1)); let r,g;
+    if(t<0.5){ r=Math.round(2*t*210); g=170; } else { r=210; g=Math.round(170*(1-(t-0.5)*2)); }
+    return `rgba(${r},${g},70,0.30)`; };
+  const rowDerived = (id,h,e)=>{ const per=h? e/h:0, over=per>SLA; const col=heat(per/SLA);
+    const pe=document.getElementById('sla-per-'+id), pc=document.getElementById('sla-pct-'+id);
+    pe.textContent=per.toFixed(3); pc.textContent=Math.round(per/SLA*100)+'%';
+    pe.style.background=col; pc.style.background=col;
+    document.getElementById('sla-st-'+id).innerHTML=statusHTML(over); };
+  function recalcSla(fromRollup){
+    let TH=0,TE=0,TN=0,TM=0;
+    slaRows.forEach((r,i)=>{
+      const h=wifVal(i,'h'), e=wifVal(i,'e');
+      rowDerived(i,h,e); TH+=h;TE+=e;TN+=wifVal(i,'non');TM+=wifVal(i,'mitE');
+    });
+    if(!fromRollup){ setVal('T','h',TH); setVal('T','e',TE); setVal('T','non',TN); setVal('T','mitE',TM); }
+    rowDerived('T', wifVal('T','h'), wifVal('T','e'));
+  }
+  recalcSla(false);
+  d.querySelectorAll('.wif').forEach(inp=>inp.addEventListener('input',e=>recalcSla(e.target.dataset.i==='T')));
+  document.getElementById('slaReset').addEventListener('click',()=>{
+    slaRows.forEach((r,i)=>{ const o=slaOrig[i];
+      setVal(i,'h',o.h); setVal(i,'e',o.e); setVal(i,'non',o.non); setVal(i,'mitE',o.mitE); });
+    recalcSla(false);
+  });
+
+  // per-chart save control: format picker (default JPEG) + Save button
+  d.querySelectorAll('.panel').forEach(p=>{
+    if(!p.querySelector('canvas')) return;
+    const h=p.querySelector('h3');
+    const name=(h?h.textContent:'chart').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+    const wrap=document.createElement('div'); wrap.className='savewrap noprint';
+    const sel=document.createElement('select'); sel.title='Image format';
+    [['jpeg','JPEG'],['png','PNG'],['webp','WEBP']].forEach(([v,l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; sel.appendChild(o); });
+    const b=document.createElement('button'); b.textContent='Save'; b.title='Save this chart as an image';
+    b.addEventListener('click', ()=>savePanel(p, name, sel.value));
+    wrap.appendChild(sel); wrap.appendChild(b); p.appendChild(wrap);
+  });
+
   window._report = {
     sla: slaRows,
     metrics: { totalHosts, openFindings: cum.length, exploitableOpen: expl.length,
       exploitablePerAsset: +explPerHost.toFixed(4), sla: SLA, pctOfSla: Math.round(explPerHost/SLA*100),
       mitigated: mit.length, remediationRatePct: +remRate.toFixed(1), mttrDays: mttr!=null?+mttr.toFixed(1):null,
-      publishedOver1yr: oldPub, log4jRelated: log4j },
-    topVulns: topExpl.map(([name,rows])=>({plugin:name, pluginID:rows[0].pluginID, severity:rows[0].severity,
+      publishedOver1yr: oldPub, firstSeenOver1yr: oldSeen, log4jRelated: log4j },
+    slaPastDue: { slaDays: {...STATE.slaDays}, basis: 'vulnPubDate', counts: slaCounts() },
+    topVulns: topBy(expl, r=>r.pluginName, STATE.topN).map(([name,rows])=>({plugin:name, pluginID:rows[0].pluginID, severity:rows[0].severity,
       cve:rows[0].cve, exploitFrameworks:rows[0].exploitFrameworks, instances:rows.length, hosts:uniqHosts(rows)})),
     hosts: topHosts.map(([h,o])=>({host:h, bu:o.bu, os:o.os, ip:o.ip, exploitable:o.n})),
-    severity: sevCount, os: osC, cloud: clC, byMonth,
+    severity: sevCount, os: osTot, byMonth,
     cumulative: cum, mitigated: mit
   };
+}
+
+// ---------- save a chart visual as an image (from its canvas) ----------
+function savePanel(el, name, fmt){
+  const cv = el.querySelector('canvas'); if(!cv) return;
+  fmt = fmt || 'jpeg';
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--panel').trim() || '#171a23';
+  const tmp = document.createElement('canvas'); tmp.width=cv.width; tmp.height=cv.height;
+  const ctx = tmp.getContext('2d');
+  ctx.fillStyle = bg; ctx.fillRect(0,0,tmp.width,tmp.height); ctx.drawImage(cv,0,0);
+  const mime = 'image/'+fmt;
+  const url = tmp.toDataURL(mime, fmt==='jpeg'||fmt==='webp'?0.92:undefined);
+  const ext = fmt==='jpeg'?'jpg':fmt;
+  const a=document.createElement('a'); a.href=url;
+  a.download=(name||'visual')+'_'+new Date().toISOString().slice(0,10)+'.'+ext; a.click();
 }
 
 // ---------- export ----------
@@ -377,6 +562,27 @@ function doExport(kind){
   const R=window._report; if(!R){ alert('Load data first.'); return; }
   const stamp=new Date().toISOString().slice(0,10);
   if(kind==='report-pdf'){ window.print(); return; }
+  if(kind==='report-html'){
+    const bg=getComputedStyle(document.documentElement).getPropertyValue('--panel').trim()||'#171a23';
+    const src=document.getElementById('dashboard');
+    const liveCanvas=src.querySelectorAll('canvas');
+    const clone=src.cloneNode(true);
+    clone.querySelectorAll('canvas').forEach((c,i)=>{
+      const live=liveCanvas[i]; const t=document.createElement('canvas'); t.width=live.width; t.height=live.height;
+      const cx=t.getContext('2d'); cx.fillStyle=bg; cx.fillRect(0,0,t.width,t.height); cx.drawImage(live,0,0);
+      const img=document.createElement('img'); img.src=t.toDataURL('image/png'); img.style.width='100%'; c.replaceWith(img);
+    });
+    clone.querySelectorAll('.noprint').forEach(e=>e.remove());
+    clone.querySelectorAll('input').forEach(inp=>{ const s=document.createElement('span'); s.textContent=inp.value; inp.replaceWith(s); });
+    const theme=document.documentElement.dataset.theme||'dark';
+    const styles=document.querySelector('style').outerHTML;
+    const html=`<!DOCTYPE html><html data-theme="${theme}"><head><meta charset="utf-8">`+
+      `<meta name="viewport" content="width=device-width, initial-scale=1">`+
+      `<title>Tenable Vulnerability Dashboard — report ${stamp}</title>${styles}</head>`+
+      `<body><main style="padding:24px 28px"><h1>Tenable Vulnerability Dashboard</h1>`+
+      `<p class="sub" style="color:var(--muted)">Generated ${stamp} · all analysis performed locally in-browser.</p>`+
+      `${clone.outerHTML}</main></body></html>`;
+    dl(`vm_report_${stamp}.html`, html, 'text/html'); return; }
   if(kind==='sla-csv'){ const t=slaTable(); dl(`sla_summary_${stamp}.csv`, toCsv(t.headers,t.rows), 'text/csv'); return; }
   if(kind==='topvulns-csv'){ dl(`top_exploitable_vulns_${stamp}.csv`, objCsv(R.topVulns), 'text/csv'); return; }
   if(kind==='hosts-csv'){ dl(`most_exposed_hosts_${stamp}.csv`, objCsv(R.hosts), 'text/csv'); return; }
@@ -384,12 +590,11 @@ function doExport(kind){
     const rows=[]; const push=(cat,k,v)=>rows.push([cat,k,v]);
     Object.entries(R.severity).forEach(([k,v])=>push('severity',k,v));
     Object.entries(R.os).forEach(([k,v])=>push('operatingSystem (exploitable)',k,v));
-    Object.entries(R.cloud).forEach(([k,v])=>push('cloudProvider (exploitable)',k,v));
     Object.entries(R.byMonth).forEach(([k,v])=>push('mitigated_by_month',k,v));
     dl(`breakdowns_${stamp}.csv`, toCsv(['category','key','count'],rows), 'text/csv'); return; }
   if(kind==='open-csv'){ dl(`cumulative_open_${stamp}.csv`, objCsv(R.cumulative), 'text/csv'); return; }
   if(kind==='mit-csv'){ dl(`mitigated_${stamp}.csv`, objCsv(R.mitigated), 'text/csv'); return; }
-  if(kind==='metrics-json'){ dl(`vm_metrics_${stamp}.json`, JSON.stringify({metrics:R.metrics, sla:R.sla, severity:R.severity, os:R.os, cloud:R.cloud, byMonth:R.byMonth}, null, 2), 'application/json'); return; }
+  if(kind==='metrics-json'){ dl(`vm_metrics_${stamp}.json`, JSON.stringify({metrics:R.metrics, sla:R.sla, severity:R.severity, os:R.os, byMonth:R.byMonth}, null, 2), 'application/json'); return; }
   if(kind==='sla-xlsx' || kind==='all-xlsx'){
     const wb=XLSX.utils.book_new();
     const t=slaTable(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([t.headers,...t.rows]), 'SLA Summary');
@@ -426,6 +631,11 @@ function bar(id,labels,datasets){
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:tc()}}},
       scales:{x:{ticks:{color:tc()},grid:{display:false}},y:{ticks:{color:tc()},grid:{color:gc()}}}}}));
 }
+function stackedHBar(id,labels,datasets){
+  charts.push(new Chart(document.getElementById(id),{type:'bar',data:{labels,datasets},
+    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{stacked:true,ticks:{color:tc()},grid:{color:gc()}},y:{stacked:true,ticks:{color:tc()},grid:{display:false}}}}}));
+}
 function hbar(id,labels,data,color){
   charts.push(new Chart(document.getElementById(id),{type:'bar',
     data:{labels,datasets:[{data,backgroundColor:color}]},
@@ -442,8 +652,8 @@ function topBy(rows,keyfn,n){
   const m={}; rows.forEach(r=>{const k=keyfn(r);(m[k]=m[k]||[]).push(r)});
   return Object.entries(m).sort((a,b)=>b[1].length-a[1].length).slice(0,n);
 }
-function kpi(l,v,cls,sub){ return `<div class="card"><div class="l">${l}</div>
-  <div class="v ${v.length>6?'s':''}">${v}</div>${sub?`<div class="sub" style="color:var(--${cls==='over'?'crit':'ok'})">${sub}</div>`:''}</div>`; }
+function kpi(l,v,cls,sub){ const txt=String(v).replace(/<[^>]*>/g,''); return `<div class="card"><div class="l">${l}</div>
+  <div class="v ${txt.length>6?'s':''}">${v}</div>${sub?`<div class="sub" style="color:var(--${cls==='over'?'crit':'ok'})">${sub}</div>`:''}</div>`; }
 function html(s){ const t=document.createElement('template'); t.innerHTML=s.trim(); return t.content.firstChild; }
 
 </script>
