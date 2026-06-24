@@ -25,7 +25,7 @@
     justify-content:space-between;flex-wrap:wrap;gap:12px}
   h1{font-size:20px;margin:0;font-weight:600}
   .sub{color:var(--muted);font-size:13px;margin-top:2px}
-  .priv{font-size:12px;color:var(--ok);border:1px solid var(--ok);border-radius:6px;padding:3px 9px}
+  .priv{font-size:12px;color:var(--ok);border:1px solid var(--ok);border-radius:6px;padding:9px 11px;display:inline-flex;align-items:center;justify-content:center;text-align:center;line-height:1.2}
   main{padding:24px 28px;max-width:1180px;margin:0 auto}
   .drop{border:2px dashed var(--line);border-radius:12px;padding:34px;text-align:center;background:var(--panel);
     transition:.15s;cursor:pointer}
@@ -304,7 +304,6 @@ function render(){
   const totalHosts = Object.values(hostsByBu).reduce((a,b)=>a+b,0);
   const ipCount = new Set([...cum, ...mit].map(r=>r.ip).filter(Boolean)).size;
   const explPerHost = expl.length/Math.max(totalHosts,1);
-  const remRate = mit.length/Math.max(mit.length+cum.length,1)*100;
 
   // MTTR from mitigated
   const mttrVals = mit.map(r=> (r.firstSeen&&r.mitigatedDate)? daysBetween(r.firstSeen,r.mitigatedDate):null).filter(v=>v!=null&&v>=0);
@@ -391,7 +390,7 @@ function render(){
   const wifInput = (i,k,v)=>`<input class="wif" data-i="${i}" data-k="${k}" value="${v}">`;
   d.appendChild(html(`<div class="panel">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-      <h3 style="margin:0">KPI - Exploitable-vulnerability SLA by segment</h3>
+      <h3 style="margin:0">KPI - Exploitable vulnerability SLA by segment</h3>
       <button id="slaReset" class="noprint" style="font-size:12px;padding:5px 11px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);cursor:pointer">Reset values</button>
     </div>
     <table style="margin-top:12px"><thead><tr><th>Segment</th><th class="num">Assets</th><th class="num">Exploitable open</th>
@@ -412,6 +411,7 @@ function render(){
       <td class="num">${wifInput(i,'non',r.non)}</td>
       <td class="num">${wifInput(i,'mitE',r.mitE)}</td></tr>`).join('')}
     </tbody></table>
+    <p class="sub"><b style="color:var(--accent)">SLA target: 0.25</b> — an average of no more than 0.25 vulnerabilities past SLA per system (Past SLA ÷ IP ≤ 0.25). Anything above 0.25 is over SLA.</p>
     <p class="sub noprint">Heat-mapped what-if: Per asset and % of SLA cells shade green→red by SLA pressure. Edit Assets, Exploitable open, Non-exploitable or Exploitable mitigated to recalculate live. "Reset values" restores the data.</p>
     </div>`));
   const slaOrig = slaRows.map(r=>({h:r.h,e:r.e,non:r.non,mitE:r.mitE}));
@@ -633,7 +633,7 @@ function render(){
     sla: slaRows,
     metrics: { totalHosts, openFindings: cum.length, exploitableOpen: expl.length,
       exploitablePerAsset: +explPerHost.toFixed(4), sla: SLA, pctOfSla: Math.round(explPerHost/SLA*100),
-      mitigated: mit.length, remediationRatePct: +remRate.toFixed(1), mttrDays: mttr!=null?+mttr.toFixed(1):null,
+      mitigated: mit.length, mttrDays: mttr!=null?+mttr.toFixed(1):null,
       publishedOver1yr: oldPub, firstSeenOver1yr: oldSeen, log4jRelated: log4j },
     slaPastDue: { slaDays: {...STATE.slaDays}, basis: 'vulnPubDate', counts: slaCounts() },
     topVulns: topBy(expl, r=>r.pluginName, STATE.topN).map(([name,rows])=>({plugin:name, pluginID:rows[0].pluginID, severity:rows[0].severity,
@@ -723,7 +723,7 @@ function doExport(kind){
     md+=`## Executive summary\n\n`;
     md+=`- Assets analyzed: **${m.totalHosts.toLocaleString()}**\n- Open findings: **${m.openFindings.toLocaleString()}**\n`;
     md+=`- Exploitable open: **${m.exploitableOpen.toLocaleString()}**\n- Exploitable per asset: **${m.exploitablePerAsset}** (SLA ${m.sla}, ${m.pctOfSla}% of SLA)\n`;
-    md+=`- Mitigated findings: **${m.mitigated.toLocaleString()}**\n- Remediation rate: **${m.remediationRatePct}%**\n- Mean time to remediate: **${m.mttrDays!=null?m.mttrDays+' days':'n/a'}**\n\n`;
+    md+=`- Mitigated findings: **${m.mitigated.toLocaleString()}**\n- Mean time to remediate: **${m.mttrDays!=null?m.mttrDays+' days':'n/a'}**\n\n`;
     md+=`## Exploitable-vulnerability SLA by segment\n\n| ${t.headers.join(' | ')} |\n|${t.headers.map(()=>'---').join('|')}|\n`;
     t.rows.forEach(r=>md+=`| ${r.join(' | ')} |\n`);
     md+=`\n## Top exploitable vulnerabilities\n\n| Plugin | Severity | CVE | Instances | Hosts |\n|---|---|---|---|---|\n`;
@@ -779,7 +779,7 @@ function html(s){ const t=document.createElement('template'); t.innerHTML=s.trim
 })();
 const PANEL_TIPS = {
   'Vulnerabilities past remediation SLA':'Set per-severity remediation SLA day targets (aged from vulnPubDate). The datapoints count and average findings past those targets.',
-  'KPI - Exploitable-vulnerability SLA by segment':'Editable what-if: per-segment exploitable findings ÷ assets vs the 0.25 SLA. Edit the basic values to see Per asset, % of SLA and Status recalculate; cells heat-shade by SLA pressure.',
+  'KPI - Exploitable vulnerability SLA by segment':'Editable what-if: per-segment exploitable findings ÷ assets vs the 0.25 SLA. Edit the basic values to see Per asset, % of SLA and Status recalculate; cells heat-shade by SLA pressure.',
   'Vulnerabilities past remediation SLA by segment':'Plugin × segment counts of open findings past their remediation SLA — driven live by the SLA day targets above.',
   'Open findings by severity':'Severity breakdown of all open findings.',
   'Exploitable vulnerabilities by SLA, and segment':'Per-segment exploitable findings vs the per-segment SLA threshold (assets × 0.25).',
