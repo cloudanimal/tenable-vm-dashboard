@@ -62,6 +62,7 @@
   .savewrap{position:absolute;top:12px;right:14px;display:flex;align-items:center;gap:6px;z-index:5}
   .savewrap select,.savewrap button{font-size:11px;padding:4px 8px;border-radius:6px;
     background:var(--panel2);border:1px solid var(--line);color:var(--txt);cursor:pointer}
+  .savewrap button{min-width:52px;text-align:center}
   .savewrap button:hover{border-color:var(--accent)}
   .savewrap.savebottom{position:static;justify-content:flex-end;margin-top:12px}
   .savewrap .saving{opacity:.6;pointer-events:none}
@@ -69,7 +70,7 @@
     border:1px solid var(--line);border-radius:8px;padding:9px 16px;font-size:13px;z-index:200;
     opacity:0;transition:opacity .2s ease;pointer-events:none}
   .toast.show{opacity:1}
-  .panel > h3{padding-right:150px}
+  .panel > h3{padding-right:215px}
   .panel h3{margin:0 0 14px;font-size:15px;font-weight:600}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
@@ -157,7 +158,7 @@
   </div>
 </header>
 <main>
-  <div id="jumpBar" class="noprint" style="display:none;margin:0 0 14px">
+  <div id="jumpBar" class="noprint" style="display:none;position:sticky;top:0;z-index:30;padding:10px 0;margin:0 0 10px;background:var(--bg);border-bottom:1px solid var(--line)">
     <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
       <label class="sub" style="display:flex;align-items:center;gap:8px;margin:0">Segment
         <select id="segSel" class="hostinput" style="width:auto;padding:8px 10px" title="Filter the whole dashboard to one segment"></select></label>
@@ -724,21 +725,46 @@ function render(){
   document.getElementById('hostSev').addEventListener('change', e=>{ STATE.hostsSev=e.target.value; fillHosts(); });
 
 
-  // per-panel save control on every larger card (charts + tables): format picker + Save button
-  d.querySelectorAll('.panel').forEach(p=>{
-    const isChart = !!p.querySelector('canvas');
-    if(!isChart && !p.querySelector('table')) return;          // only the larger report cards
-    if(p.querySelector('.savewrap')) return;
+  // per-card save control: format picker + Save button, always pinned top-right
+  const attachSave = (p, forceName)=>{
+    if(!p || p.querySelector('.savewrap')) return;
     const h=p.querySelector('h3');
-    const name=(h?h.textContent:'panel').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
-    const wrap=document.createElement('div'); wrap.className='savewrap noprint'+(isChart?'':' savebottom');
+    const name=(forceName || (h?h.textContent:'panel')).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+    const wrap=document.createElement('div'); wrap.className='savewrap noprint';
     const sel=document.createElement('select'); sel.title='Save as';
     [['png','PNG'],['jpeg','JPEG'],['webp','WEBP'],['gif','GIF'],['clipboard','Clipboard']]
       .forEach(([v,l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; sel.appendChild(o); });
     const b=document.createElement('button'); b.textContent='Save'; b.title='Save this card as an image';
     b.addEventListener('click', ()=>savePanel(p, name, sel.value, b));
-    wrap.appendChild(sel); wrap.appendChild(b); p.appendChild(wrap);
-  });
+    wrap.appendChild(sel); wrap.appendChild(b);
+    // Reset only on cards that have adjustable controls (day targets, what-if inputs, severity/show-top filters)
+    const hasControls = !!p.querySelector('.slainp, .wif, input[type=range]');
+    if(hasControls){
+      const rb=document.createElement('button'); rb.textContent='Reset'; rb.title='Reset this card to its default view';
+      rb.addEventListener('click', ()=>{ if(typeof p._cardReset==='function') p._cardReset(); });
+      wrap.appendChild(rb);
+    }
+    p.appendChild(wrap);
+    // clear the top-right corner so the controls never overlap existing header controls
+    const reserve = hasControls ? '215px' : '150px';
+    if(p.classList.contains('cards')){ p.style.position='relative'; p.style.paddingTop='40px'; }
+    else { const hdr=[...p.children].find(c=>c.tagName==='DIV' && c.querySelector(':scope>h3'));
+      if(hdr) hdr.style.paddingRight=reserve; else if(h) h.style.paddingRight=reserve; }
+  };
+  // larger report cards (charts + tables)
+  d.querySelectorAll('.panel').forEach(p=>{ if(p.querySelector('canvas')||p.querySelector('table')) attachSave(p); });
+  // card-grid blocks with no table/canvas: executive KPI strip + per-severity SLA-aging cards
+  attachSave(d.querySelector('.cards'), 'executive_kpis');
+  attachSave(document.getElementById('slaConfig'));
+
+  // per-card Reset handlers — only cards with adjustable controls; route through existing reset logic where it exists
+  const regReset=(p,fn)=>{ if(p) p._cardReset=fn; };
+  ['slaDaysReset','slaReset'].forEach(id=>{ const b=document.getElementById(id); if(b) b.style.display='none'; }); // fold the old in-header Resets into the top-right one
+  regReset(document.getElementById('slaConfig'), ()=>{ const b=document.getElementById('slaDaysReset'); if(b) b.click(); });
+  regReset(d.querySelector('.wif')?.closest('.panel'), ()=>{ const b=document.getElementById('slaReset'); if(b) b.click(); });
+  regReset(document.getElementById('sumN')?.closest('.panel'), ()=>{ STATE.summaryN=5; const s=document.getElementById('sumN'); s.value=Math.min(5,sMax); document.getElementById('sumNval').textContent=sLabel(Math.min(5,sMax)); fillSummary(); });
+  regReset(document.getElementById('topN')?.closest('.panel'), ()=>{ STATE.topSev='all'; STATE.topN=5; const ts=document.getElementById('topSev'); if(ts) ts.value='all'; const tn=document.getElementById('topN'); tn.value=Math.min(5,maxN); document.getElementById('topNval').textContent=topLabel(Math.min(5,maxN)); fillTopExpl(); });
+  regReset(document.getElementById('hostN')?.closest('.panel'), ()=>{ STATE.hostsSev='all'; STATE.hostsN=10; const hs=document.getElementById('hostSev'); if(hs) hs.value='all'; const hn=document.getElementById('hostN'); hn.value=Math.min(10,hMax); document.getElementById('hostNval').textContent=hLabel(Math.min(10,hMax)); fillHosts(); });
 
   buildJumpNav();
   applyPanelTips();
