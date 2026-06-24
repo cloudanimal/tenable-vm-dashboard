@@ -132,7 +132,7 @@
 <script>
 const SLA = 0.25;                       // exploitable vulns per host
 const $ = s => document.querySelector(s);
-let STATE = { cumulative: [], mitigated: [], hostOverride: {} };
+let STATE = { cumulative: [], mitigated: [], hostOverride: {}, topN: 5 };
 let charts = [];
 
 // ---------- ingest ----------
@@ -268,8 +268,8 @@ function render(){
       non: cum.filter(r=>bu(r)===b&&!isExpl(r)).length,
       mitE: mit.filter(r=>bu(r)===b&&isExpl(r)).length};
   });
-  d.appendChild(html(`<div class="panel"><h3>Exploitable-vulnerability SLA by business unit</h3>
-    <table><thead><tr><th>Business unit</th><th class="num">Assets</th><th class="num">Exploitable open</th>
+  d.appendChild(html(`<div class="panel"><h3>Exploitable-vulnerability SLA by segment</h3>
+    <table><thead><tr><th>Segment</th><th class="num">Assets</th><th class="num">Exploitable open</th>
     <th class="num">Per asset</th><th class="num">% of SLA</th><th>Status</th><th class="num">Non-exploitable</th>
     <th class="num">Exploitable mitigated</th></tr></thead><tbody>
     ${slaRows.map(r=>`<tr><td>${r.b}</td>
@@ -285,22 +285,10 @@ function render(){
     STATE.hostOverride[e.target.dataset.bu]=parseInt(e.target.value)||0; render();
   }));
 
-  // top 5 vulnerabilities overall (by instances across open findings)
-  const top5 = topBy(cum, r=>r.pluginName, 5);
-  d.appendChild(html(`<div class="panel"><h3>Top 5 vulnerabilities (open)</h3>
-    <table><thead><tr><th>#</th><th>Vulnerability</th><th>Severity</th><th>CVE</th><th>Exploit</th>
-    <th class="num">Instances</th><th class="num">Hosts</th></tr></thead><tbody>
-    ${top5.map(([name,rows],i)=>`<tr><td>${i+1}</td><td>${name}</td>
-      <td class="sev-${rows[0].severity}">${rows[0].severity}</td>
-      <td style="font-size:12px">${rows[0].cve||'—'}</td>
-      <td>${String(rows[0].exploitAvailable).toLowerCase()==='yes'?'<span class="pill over">Yes</span>':'<span class="pill ok">No</span>'}</td>
-      <td class="num">${fmtNum(rows.length)}</td><td class="num">${fmtNum(uniqHosts(rows))}</td></tr>`).join('')}
-    </tbody></table></div>`));
-
   // charts row: severity + exploitable by BU
   d.appendChild(html(`<div class="grid2">
     <div class="panel"><h3>Open findings by severity</h3><div class="chartbox"><canvas id="cSev"></canvas></div></div>
-    <div class="panel"><h3>Exploitable open vs SLA, by BU</h3><div class="chartbox"><canvas id="cBu"></canvas></div></div>
+    <div class="panel"><h3>Exploitable open vs SLA, by segment</h3><div class="chartbox"><canvas id="cBu"></canvas></div></div>
   </div>`));
   const sevCount = groupCount(cum, r=>r.severity);
   donut('cSev', ['Critical','High','Medium','Low','Info'].filter(s=>sevCount[s]),
@@ -311,17 +299,23 @@ function render(){
     {label:'SLA threshold', data:slaRows.map(r=>Math.round(r.h*SLA)), backgroundColor:'#3bb273'}
   ]);
 
-  // top exploitable vulns
-  const topExpl = topBy(expl, r=>r.pluginName, 10);
-  d.appendChild(html(`<div class="panel"><h3>Top exploitable vulnerabilities (open)</h3>
-    <table><thead><tr><th>Plugin</th><th>Severity</th><th>CVE</th><th>Exploit framework</th>
+  // top exploitable vulns (adjustable count, default 5)
+  const topExpl = topBy(expl, r=>r.pluginName, STATE.topN);
+  d.appendChild(html(`<div class="panel">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <h3 style="margin:0">Top exploitable vulnerabilities (open)</h3>
+      <label class="sub noprint" style="display:flex;align-items:center;gap:6px">Show top
+        <input id="topN" class="hostinput" type="number" min="1" max="50" value="${STATE.topN}" style="width:56px"></label>
+    </div>
+    <table style="margin-top:12px"><thead><tr><th>#</th><th>Plugin</th><th>Severity</th><th>CVE</th><th>Exploit framework</th>
     <th class="num">Instances</th><th class="num">Hosts</th></tr></thead><tbody>
-    ${topExpl.map(([name,rows])=>`<tr>
-      <td>${name}</td><td class="sev-${rows[0].severity}">${rows[0].severity}</td>
+    ${topExpl.map(([name,rows],i)=>`<tr>
+      <td>${i+1}</td><td>${name}</td><td class="sev-${rows[0].severity}">${rows[0].severity}</td>
       <td style="font-size:12px">${(rows[0].cve||'—')}</td>
       <td style="font-size:12px">${rows[0].exploitFrameworks||'—'}</td>
-      <td class="num">${rows.length}</td><td class="num">${uniqHosts(rows)}</td></tr>`).join('')}
+      <td class="num">${fmtNum(rows.length)}</td><td class="num">${fmtNum(uniqHosts(rows))}</td></tr>`).join('')}
     </tbody></table></div>`));
+  d.querySelector('#topN').addEventListener('change', e=>{ STATE.topN=Math.max(1,Math.min(50,parseInt(e.target.value)||5)); render(); });
 
   // OS + cloud
   d.appendChild(html(`<div class="grid2">
@@ -348,7 +342,7 @@ function render(){
   expl.forEach(r=>{ const h=r.dnsName||r.ip; (hostExpl[h]=hostExpl[h]||{n:0,bu:bu(r),os:r.operatingSystem,ip:r.ip}).n++; });
   const topHosts = Object.entries(hostExpl).sort((a,b)=>b[1].n-a[1].n).slice(0,12);
   d.appendChild(html(`<div class="panel"><h3>Most-exposed hosts (by exploitable findings)</h3>
-    <table><thead><tr><th>Host</th><th>BU</th><th>OS</th><th>IP</th><th class="num">Exploitable</th></tr></thead><tbody>
+    <table><thead><tr><th>Host</th><th>Segment</th><th>OS</th><th>IP</th><th class="num">Exploitable</th></tr></thead><tbody>
     ${topHosts.map(([h,o])=>`<tr><td>${h}</td><td>${o.bu}</td>
       <td style="font-size:12px">${(o.os||'').replace('Microsoft ','')}</td><td style="font-size:12px">${o.ip||''}</td>
       <td class="num">${o.n}</td></tr>`).join('')}
@@ -360,8 +354,6 @@ function render(){
       exploitablePerAsset: +explPerHost.toFixed(4), sla: SLA, pctOfSla: Math.round(explPerHost/SLA*100),
       mitigated: mit.length, remediationRatePct: +remRate.toFixed(1), mttrDays: mttr!=null?+mttr.toFixed(1):null,
       publishedOver1yr: oldPub, log4jRelated: log4j },
-    top5: top5.map(([name,rows])=>({plugin:name, severity:rows[0].severity, cve:rows[0].cve,
-      exploitAvailable:rows[0].exploitAvailable, instances:rows.length, hosts:uniqHosts(rows)})),
     topVulns: topExpl.map(([name,rows])=>({plugin:name, pluginID:rows[0].pluginID, severity:rows[0].severity,
       cve:rows[0].cve, exploitFrameworks:rows[0].exploitFrameworks, instances:rows.length, hosts:uniqHosts(rows)})),
     hosts: topHosts.map(([h,o])=>({host:h, bu:o.bu, os:o.os, ip:o.ip, exploitable:o.n})),
@@ -378,7 +370,7 @@ function toCsv(headers, rows){ const esc=v=>{ v=v==null?'':String(v); return /["
 function objCsv(objs){ if(!objs.length) return ''; const cols=[...new Set(objs.flatMap(o=>Object.keys(o)))];
   return toCsv(cols, objs.map(o=>cols.map(c=>o[c]))); }
 function slaTable(){ const r=window._report.sla;
-  return { headers:['business_unit','assets','exploitable_open','exploitable_per_asset','pct_of_sla','status','non_exploitable_open','exploitable_mitigated'],
+  return { headers:['segment','assets','exploitable_open','exploitable_per_asset','pct_of_sla','status','non_exploitable_open','exploitable_mitigated'],
     rows:r.map(x=>[x.b,x.h,x.e,x.ratio.toFixed(4),Math.round(x.ratio/SLA*100)+'%',x.over?'Over SLA':'Within SLA',x.non,x.mitE]) }; }
 
 function doExport(kind){
@@ -415,7 +407,7 @@ function doExport(kind){
     md+=`- Assets analyzed: **${m.totalHosts.toLocaleString()}**\n- Open findings: **${m.openFindings.toLocaleString()}**\n`;
     md+=`- Exploitable open: **${m.exploitableOpen.toLocaleString()}**\n- Exploitable per asset: **${m.exploitablePerAsset}** (SLA ${m.sla}, ${m.pctOfSla}% of SLA)\n`;
     md+=`- Mitigated findings: **${m.mitigated.toLocaleString()}**\n- Remediation rate: **${m.remediationRatePct}%**\n- Mean time to remediate: **${m.mttrDays!=null?m.mttrDays+' days':'n/a'}**\n\n`;
-    md+=`## Exploitable-vulnerability SLA by business unit\n\n| ${t.headers.join(' | ')} |\n|${t.headers.map(()=>'---').join('|')}|\n`;
+    md+=`## Exploitable-vulnerability SLA by segment\n\n| ${t.headers.join(' | ')} |\n|${t.headers.map(()=>'---').join('|')}|\n`;
     t.rows.forEach(r=>md+=`| ${r.join(' | ')} |\n`);
     md+=`\n## Top exploitable vulnerabilities\n\n| Plugin | Severity | CVE | Instances | Hosts |\n|---|---|---|---|---|\n`;
     R.topVulns.forEach(v=>md+=`| ${v.plugin} | ${v.severity} | ${v.cve||'—'} | ${v.instances} | ${v.hosts} |\n`);
