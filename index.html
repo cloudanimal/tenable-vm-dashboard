@@ -209,7 +209,7 @@ const nextPaint = () => new Promise(r=>setTimeout(r, 30));
 function showLoading(m){ const l=document.getElementById('loading'); if(!l) return; document.getElementById('loadingMsg').textContent=m||'Loading…'; l.style.display='flex'; }
 function hideLoading(){ const l=document.getElementById('loading'); if(l) l.style.display='none'; }
 const $ = s => document.querySelector(s);
-const DEFAULT_SLA_DAYS = { Critical: 30, High: 30, Medium: 30, Low: 30 };
+const DEFAULT_SLA_DAYS = { Critical: 30, High: 30, Medium: 90, Low: 120 };
 let STATE = { cumulative: [], mitigated: [], hostOverride: {}, topN: 5, summaryN: 5, cbTheme: 'default', topSev: 'all', hostsN: 10, hostsSev: 'all', segFilter: 'all',
   slaDays: { ...DEFAULT_SLA_DAYS } };
 const PALS_DEFAULT = {crit:'#e24b4a', high:'#ef9f27', med:'#378add', low:'#888780', info:'#5a5f6e', ok:'#3bb273', accent:'#4f8cff'};
