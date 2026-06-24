@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Tenable VM Dashboard — local, in-browser</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   :root{
@@ -160,8 +161,8 @@ async function handleFiles(fileList, forcedKind){
         if(isDataSheet(rows)) addRows(rows, sn);
       });
     } else if(ext==='csv'){
-      const wb = XLSX.read(await f.text(), {type:'string'});
-      addRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:''}), f.name, forcedKind);
+      const rows = Papa.parse(await f.text(), {header:true, skipEmptyLines:true, dynamicTyping:false}).data;
+      addRows(rows, f.name, forcedKind);
     } else if(ext==='json'){
       let data = JSON.parse(await f.text());
       if(!Array.isArray(data)) data = data.results || data.response?.results || [];
@@ -173,11 +174,17 @@ async function handleFiles(fileList, forcedKind){
 }
 async function loadSample(){
   try{
-    const buf = await (await fetch('sample-data/Tenable_SC_VulnDetail_Sample.xlsx')).arrayBuffer();
-    const wb = XLSX.read(buf,{type:'array'});
-    wb.SheetNames.forEach(sn=>{ const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:''}); if(isDataSheet(rows)) addRows(rows, sn); });
-    render();
-  }catch(e){ alert('Could not load sample (serve the page over http, or upload the file manually).'); }
+    const parseCsv = (text, kind) => {
+      const rows = Papa.parse(text, {header:true, skipEmptyLines:true, dynamicTyping:false}).data;
+      addRows(rows, kind, kind);
+    };
+    const [cum, mit] = await Promise.all([
+      fetch('sample-data/cumulative.csv').then(r=>r.text()),
+      fetch('sample-data/mitigated.csv').then(r=>r.text())
+    ]);
+    parseCsv(cum, 'cumulative'); parseCsv(mit, 'mitigated');
+    setState(); render();
+  }catch(e){ alert('Could not load sample (serve the page over http, or upload the files manually).'); }
 }
 
 // ---------- helpers ----------

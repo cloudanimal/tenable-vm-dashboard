@@ -33,7 +33,7 @@ The columns expected are the standard Tenable.sc `/analysis` `vulndetails` field
 
 ## Try it
 
-Click **Load sample data** on the page, or upload [`sample-data/Tenable_SC_VulnDetail_Sample.xlsx`](sample-data/Tenable_SC_VulnDetail_Sample.xlsx) — a fully synthetic dataset (1,000 hosts across 5 business units, cumulative + mitigated, full field schema).
+Click **Load sample data** on the page, or upload [`sample-data/Tenable_SC_VulnDetail_Sample.xlsx`](sample-data/Tenable_SC_VulnDetail_Sample.xlsx) — a fully synthetic dataset (18,000 hosts across 5 business units, ~6.7k open + ~11.8k mitigated findings, full field schema).
 
 ## Export
 
