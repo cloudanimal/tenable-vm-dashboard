@@ -157,6 +157,7 @@
     &nbsp;·&nbsp; <a href="https://github.com/cloudanimal/tenable-vm-dashboard">source on GitHub</a>
   </div>
 </main>
+<div id="tt" class="noprint" style="position:fixed;z-index:1000;pointer-events:none;max-width:340px;background:#0d1016;color:#f4f5f8;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:10px 13px;font-size:13.5px;font-weight:400;line-height:1.5;box-shadow:0 8px 26px rgba(0,0,0,.45);opacity:0;transition:opacity .1s;display:none"></div>
 <script>
 const SLA = 0.25;                       // exploitable vulns per host
 const $ = s => document.querySelector(s);
@@ -322,6 +323,8 @@ function render(){
       ${kpi('IP Addresses', fmtNum(ipCount), null, null, 'Count of unique IP addresses in the IP column (open + mitigated data).')}
       ${kpi('Total Vulnerabilities', fmtNum(cum.length), null, null, 'All open vulnerability findings (cumulative export). One row = one plugin finding on one host:port.')}
       ${kpi('Total Exploitable', `<span style="color:var(--crit)">${fmtNum(expl.length)}</span>`, null, null, 'Open findings flagged exploitAvailable = Yes.')}
+      <div class="card" title="Open findings (all severities) past their remediation SLA. Driven by the SLA day targets in the config panel."><div class="l">Total past SLA</div>
+        <div class="v" id="kpiPastTotal" style="color:var(--crit)">0</div></div>
       <div class="card" title="Exploitable findings past their remediation SLA ÷ unique IPs. Turns red over the ${SLA} per-IP threshold. Driven by the SLA day targets in the config panel."><div class="l">Avg Past SLA</div>
         <div class="v" id="kpiPastPer">0.000</div>
         <div class="sub" id="kpiPastSub" style="color:var(--ok)">SLA ${SLA}</div></div>
@@ -329,7 +332,6 @@ function render(){
       ${kpi('1st seen &gt; 1 yr ago', fmtNum(oldSeen), null, null, 'Open findings first detected in your environment (firstSeen) more than 1 year ago.')}
       ${kpi('Log4j', `<span style="color:var(--crit)">${fmtNum(log4j)}</span>`, null, null, 'Open findings referencing Log4j (plugin name, synopsis, description, CVE, or output).')}
       ${kpi('Mitigated findings', fmtNum(mit.length), null, null, 'Remediated / no-longer-detected findings from the mitigated (patched) export.')}
-      ${kpi('Remediation rate', remRate.toFixed(0)+'%', null, null, 'Mitigated ÷ (mitigated + open) findings. Point-in-time ratio, not a time-windowed rate.')}
       ${kpi('Mean time to remediate', mttr!=null? mttr.toFixed(0)+' d':'—', null, null, 'Avg days from firstSeen to mitigatedDate across mitigated findings. NOTE: calculation under review.')}
     </div>`));
 
@@ -372,6 +374,7 @@ function render(){
   const uniqIp = new Set([...cum,...mit].map(r=>r.ip).filter(Boolean)).size;
   let summaryRefresh = null, topRefresh = null;
   const fillSla = () => { const c=slaCounts(); document.getElementById('sla-total').textContent=fmtNum(c.total);
+    { const kt=document.getElementById('kpiPastTotal'); if(kt) kt.textContent=fmtNum(c.total); }
     sevList.forEach(s=>document.getElementById('sla-'+s).textContent=fmtNum(c[s]));
     sevList.forEach(s=>{ const el=document.getElementById('sla-avg-'+s); if(el) el.textContent=(uniqIp? c[s]/uniqIp : 0).toFixed(3); });
     const ep = uniqIp? c.expl/uniqIp : 0; const epEl=document.getElementById('sla-expl-per');
@@ -383,6 +386,63 @@ function render(){
   fillSla();
   d.querySelectorAll('.slainp').forEach(inp=>inp.addEventListener('input',e=>{
     const v=parseInt(e.target.value); STATE.slaDays[e.target.dataset.sev]= isNaN(v)?0:Math.max(0,v); fillSla(); }));
+
+  // KPI - Exploitable-vulnerability SLA by segment — heat-mapped what-if table
+  const wifInput = (i,k,v)=>`<input class="wif" data-i="${i}" data-k="${k}" value="${v}">`;
+  d.appendChild(html(`<div class="panel">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <h3 style="margin:0">KPI - Exploitable-vulnerability SLA by segment</h3>
+      <button id="slaReset" class="noprint" style="font-size:12px;padding:5px 11px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);cursor:pointer">Reset values</button>
+    </div>
+    <table style="margin-top:12px"><thead><tr><th>Segment</th><th class="num">Assets</th><th class="num">Exploitable open</th>
+    <th class="num">Per asset</th><th class="num">% of SLA</th><th>Status</th><th class="num">Non-exploitable</th>
+    <th class="num">Exploitable mitigated</th></tr></thead><tbody>
+    <tr style="border-bottom:2px solid var(--line)"><td style="font-weight:600">ALL</td>
+      <td class="num">${wifInput('T','h','')}</td>
+      <td class="num">${wifInput('T','e','')}</td>
+      <td class="num" id="sla-per-T"></td><td class="num" id="sla-pct-T"></td><td id="sla-st-T"></td>
+      <td class="num">${wifInput('T','non','')}</td>
+      <td class="num">${wifInput('T','mitE','')}</td></tr>
+    ${slaRows.map((r,i)=>`<tr><td>${r.b}</td>
+      <td class="num">${wifInput(i,'h',r.h)}</td>
+      <td class="num">${wifInput(i,'e',r.e)}</td>
+      <td class="num" id="sla-per-${i}">${r.ratio.toFixed(3)}</td>
+      <td class="num" id="sla-pct-${i}">${Math.round(r.ratio/SLA*100)}%</td>
+      <td id="sla-st-${i}"><span class="pill ${r.over?'over':'ok'}">${r.over?'Over SLA':'Within SLA'}</span></td>
+      <td class="num">${wifInput(i,'non',r.non)}</td>
+      <td class="num">${wifInput(i,'mitE',r.mitE)}</td></tr>`).join('')}
+    </tbody></table>
+    <p class="sub noprint">Heat-mapped what-if: Per asset and % of SLA cells shade green→red by SLA pressure. Edit Assets, Exploitable open, Non-exploitable or Exploitable mitigated to recalculate live. "Reset values" restores the data.</p>
+    </div>`));
+  const slaOrig = slaRows.map(r=>({h:r.h,e:r.e,non:r.non,mitE:r.mitE}));
+  const wifVal = (i,k)=>{ const el=d.querySelector(`.wif[data-i="${i}"][data-k="${k}"]`); const v=parseFloat(el.value); return isNaN(v)?0:v; };
+  const setVal = (i,k,v)=>{ const el=d.querySelector(`.wif[data-i="${i}"][data-k="${k}"]`); if(el) el.value=v; };
+  const statusHTML = over=>`<span class="pill ${over?'over':'ok'}">${over?'Over SLA':'Within SLA'}</span>`;
+  const heat = ratio => { const t=Math.max(0,Math.min(ratio/1.5,1));
+    const hx=x=>[parseInt(x.slice(1,3),16),parseInt(x.slice(3,5),16),parseInt(x.slice(5,7),16)];
+    const a=hx(PAL().ok), b=hx(PAL().crit), m=a.map((v,i)=>Math.round(v+(b[i]-v)*t));
+    return `rgba(${m[0]},${m[1]},${m[2]},0.32)`; };
+  const rowDerived = (id,h,e)=>{ const per=h? e/h:0, over=per>SLA; const col=heat(per/SLA);
+    const pe=document.getElementById('sla-per-'+id), pc=document.getElementById('sla-pct-'+id);
+    pe.textContent=per.toFixed(3); pc.textContent=Math.round(per/SLA*100)+'%';
+    pe.style.background=col; pc.style.background=col;
+    document.getElementById('sla-st-'+id).innerHTML=statusHTML(over); };
+  function recalcSla(fromRollup){
+    let TH=0,TE=0,TN=0,TM=0;
+    slaRows.forEach((r,i)=>{
+      const h=wifVal(i,'h'), e=wifVal(i,'e');
+      rowDerived(i,h,e); TH+=h;TE+=e;TN+=wifVal(i,'non');TM+=wifVal(i,'mitE');
+    });
+    if(!fromRollup){ setVal('T','h',TH); setVal('T','e',TE); setVal('T','non',TN); setVal('T','mitE',TM); }
+    rowDerived('T', wifVal('T','h'), wifVal('T','e'));
+  }
+  recalcSla(false);
+  d.querySelectorAll('.wif').forEach(inp=>inp.addEventListener('input',e=>recalcSla(e.target.dataset.i==='T')));
+  document.getElementById('slaReset').addEventListener('click',()=>{
+    slaRows.forEach((r,i)=>{ const o=slaOrig[i];
+      setVal(i,'h',o.h); setVal(i,'e',o.e); setVal(i,'non',o.non); setVal(i,'mitE',o.mitE); });
+    recalcSla(false);
+  });
 
   // vulnerability summary by segment: plugins (rows) x segments (columns), open finding counts
   const segShort = s => String(s).replace(/_Repo$/,'');
@@ -552,62 +612,6 @@ function render(){
   document.getElementById('hostSev').value=STATE.hostsSev;
   document.getElementById('hostSev').addEventListener('change', e=>{ STATE.hostsSev=e.target.value; fillHosts(); });
 
-  // Exploitable-vulnerability SLA by segment (moved to end) — heat-mapped what-if table
-  const wifInput = (i,k,v)=>`<input class="wif" data-i="${i}" data-k="${k}" value="${v}">`;
-  d.appendChild(html(`<div class="panel">
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-      <h3 style="margin:0">KPI - Exploitable-vulnerability SLA by segment</h3>
-      <button id="slaReset" class="noprint" style="font-size:12px;padding:5px 11px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);cursor:pointer">Reset values</button>
-    </div>
-    <table style="margin-top:12px"><thead><tr><th>Segment</th><th class="num">Assets</th><th class="num">Exploitable open</th>
-    <th class="num">Per asset</th><th class="num">% of SLA</th><th>Status</th><th class="num">Non-exploitable</th>
-    <th class="num">Exploitable mitigated</th></tr></thead><tbody>
-    <tr style="border-bottom:2px solid var(--line)"><td style="font-weight:600">ALL</td>
-      <td class="num">${wifInput('T','h','')}</td>
-      <td class="num">${wifInput('T','e','')}</td>
-      <td class="num" id="sla-per-T"></td><td class="num" id="sla-pct-T"></td><td id="sla-st-T"></td>
-      <td class="num">${wifInput('T','non','')}</td>
-      <td class="num">${wifInput('T','mitE','')}</td></tr>
-    ${slaRows.map((r,i)=>`<tr><td>${r.b}</td>
-      <td class="num">${wifInput(i,'h',r.h)}</td>
-      <td class="num">${wifInput(i,'e',r.e)}</td>
-      <td class="num" id="sla-per-${i}">${r.ratio.toFixed(3)}</td>
-      <td class="num" id="sla-pct-${i}">${Math.round(r.ratio/SLA*100)}%</td>
-      <td id="sla-st-${i}"><span class="pill ${r.over?'over':'ok'}">${r.over?'Over SLA':'Within SLA'}</span></td>
-      <td class="num">${wifInput(i,'non',r.non)}</td>
-      <td class="num">${wifInput(i,'mitE',r.mitE)}</td></tr>`).join('')}
-    </tbody></table>
-    <p class="sub noprint">Heat-mapped what-if: Per asset and % of SLA cells shade green→red by SLA pressure. Edit Assets, Exploitable open, Non-exploitable or Exploitable mitigated to recalculate live. "Reset values" restores the data.</p>
-    </div>`));
-  const slaOrig = slaRows.map(r=>({h:r.h,e:r.e,non:r.non,mitE:r.mitE}));
-  const wifVal = (i,k)=>{ const el=d.querySelector(`.wif[data-i="${i}"][data-k="${k}"]`); const v=parseFloat(el.value); return isNaN(v)?0:v; };
-  const setVal = (i,k,v)=>{ const el=d.querySelector(`.wif[data-i="${i}"][data-k="${k}"]`); if(el) el.value=v; };
-  const statusHTML = over=>`<span class="pill ${over?'over':'ok'}">${over?'Over SLA':'Within SLA'}</span>`;
-  const heat = ratio => { const t=Math.max(0,Math.min(ratio/1.5,1));
-    const hx=x=>[parseInt(x.slice(1,3),16),parseInt(x.slice(3,5),16),parseInt(x.slice(5,7),16)];
-    const a=hx(PAL().ok), b=hx(PAL().crit), m=a.map((v,i)=>Math.round(v+(b[i]-v)*t));
-    return `rgba(${m[0]},${m[1]},${m[2]},0.32)`; };
-  const rowDerived = (id,h,e)=>{ const per=h? e/h:0, over=per>SLA; const col=heat(per/SLA);
-    const pe=document.getElementById('sla-per-'+id), pc=document.getElementById('sla-pct-'+id);
-    pe.textContent=per.toFixed(3); pc.textContent=Math.round(per/SLA*100)+'%';
-    pe.style.background=col; pc.style.background=col;
-    document.getElementById('sla-st-'+id).innerHTML=statusHTML(over); };
-  function recalcSla(fromRollup){
-    let TH=0,TE=0,TN=0,TM=0;
-    slaRows.forEach((r,i)=>{
-      const h=wifVal(i,'h'), e=wifVal(i,'e');
-      rowDerived(i,h,e); TH+=h;TE+=e;TN+=wifVal(i,'non');TM+=wifVal(i,'mitE');
-    });
-    if(!fromRollup){ setVal('T','h',TH); setVal('T','e',TE); setVal('T','non',TN); setVal('T','mitE',TM); }
-    rowDerived('T', wifVal('T','h'), wifVal('T','e'));
-  }
-  recalcSla(false);
-  d.querySelectorAll('.wif').forEach(inp=>inp.addEventListener('input',e=>recalcSla(e.target.dataset.i==='T')));
-  document.getElementById('slaReset').addEventListener('click',()=>{
-    slaRows.forEach((r,i)=>{ const o=slaOrig[i];
-      setVal(i,'h',o.h); setVal(i,'e',o.e); setVal(i,'non',o.non); setVal(i,'mitE',o.mitE); });
-    recalcSla(false);
-  });
 
   // per-chart save control: format picker (default JPEG) + Save button
   d.querySelectorAll('.panel').forEach(p=>{
@@ -623,6 +627,7 @@ function render(){
   });
 
   buildJumpNav();
+  applyPanelTips();
 
   window._report = {
     sla: slaRows,
@@ -762,6 +767,30 @@ function topBy(rows,keyfn,n){
 function kpi(l,v,cls,sub,tip){ const txt=String(v).replace(/<[^>]*>/g,''); return `<div class="card"${tip?` title="${tip}"`:''}><div class="l">${l}</div>
   <div class="v ${txt.length>6?'s':''}">${v}</div>${sub?`<div class="sub" style="color:var(--${cls==='over'?'crit':'ok'})">${sub}</div>`:''}</div>`; }
 function html(s){ const t=document.createElement('template'); t.innerHTML=s.trim(); return t.content.firstChild; }
+(function(){ const tt=document.getElementById('tt'); let cur=null;
+  document.addEventListener('mouseover', e=>{ const el=e.target.closest('[title],[data-tt]'); if(!el) return;
+    if(el.hasAttribute('title')){ el.setAttribute('data-tt', el.getAttribute('title')); el.removeAttribute('title'); }
+    const txt=el.getAttribute('data-tt'); if(!txt) return; cur=el; tt.textContent=txt; tt.style.display='block'; tt.style.opacity='1'; });
+  document.addEventListener('mousemove', e=>{ if(tt.style.display!=='block') return;
+    const r=tt.getBoundingClientRect(); let x=e.clientX+14, y=e.clientY+16;
+    if(x+r.width>innerWidth-8) x=Math.max(8,e.clientX-14-r.width); if(y+r.height>innerHeight-8) y=Math.max(8,e.clientY-12-r.height);
+    tt.style.left=x+'px'; tt.style.top=y+'px'; });
+  document.addEventListener('mouseout', e=>{ if(cur && (!e.relatedTarget || !cur.contains(e.relatedTarget))){ tt.style.opacity='0'; tt.style.display='none'; cur=null; } });
+})();
+const PANEL_TIPS = {
+  'Vulnerabilities past remediation SLA':'Set per-severity remediation SLA day targets (aged from vulnPubDate). The datapoints count and average findings past those targets.',
+  'KPI - Exploitable-vulnerability SLA by segment':'Editable what-if: per-segment exploitable findings ÷ assets vs the 0.25 SLA. Edit the basic values to see Per asset, % of SLA and Status recalculate; cells heat-shade by SLA pressure.',
+  'Vulnerabilities past remediation SLA by segment':'Plugin × segment counts of open findings past their remediation SLA — driven live by the SLA day targets above.',
+  'Open findings by severity':'Severity breakdown of all open findings.',
+  'Exploitable vulnerabilities by SLA, and segment':'Per-segment exploitable findings vs the per-segment SLA threshold (assets × 0.25).',
+  'Top vulnerabilities past SLA':'Top plugins among findings past their remediation SLA. Filter by severity and choose how many to show.',
+  'Vulnerabilities by operating system and SLA status':'Open findings per operating system, stacked by within-SLA and past-SLA (by severity).',
+  'Remediation throughput (mitigated by month)':'Count of mitigated findings per month (from mitigatedDate).',
+  'Most-exposed hosts (by exploitable findings)':'Hosts ranked by exploitable finding count. Filter by severity and choose how many to show.'
+};
+function applyPanelTips(){
+  document.querySelectorAll('#dashboard .panel h3').forEach(h=>{ const t=PANEL_TIPS[h.textContent.trim()]; if(t){ h.title=t; h.style.cursor='help'; } });
+}
 function buildJumpNav(){
   const sel=document.getElementById('jumpSel'), bar=document.getElementById('jumpBar'), dash=document.getElementById('dashboard');
   if(!sel||!dash) return;
