@@ -269,11 +269,12 @@ function setState(){ const s=$('#loadState'); if(s) s.textContent =
 function isDataSheet(rows){
   return rows.length && rows.some(r => ('pluginID' in r) || ('exploitAvailable' in r) || ('severity' in r));
 }
+const isMitigated = r => String(r.hasBeenMitigated).toLowerCase()==='yes';
 function classify(rows, name){
   const n = (name||'').toLowerCase();
-  if(n.includes('mitigat')) return 'mitigated';
-  if(n.includes('cumulat') || n.includes('vuln')) return rows.some(r=>r.mitigatedDate)?'mitigated':'cumulative';
-  return rows.some(r=>r.mitigatedDate || String(r.hasBeenMitigated).toLowerCase()==='yes') ? 'mitigated' : 'cumulative';
+  if(n.includes('mitigat') || n.includes('patch')) return 'mitigated';
+  if(n.includes('cumulat') || n.includes('vuln')) return rows.some(isMitigated)?'mitigated':'cumulative';
+  return rows.some(isMitigated) ? 'mitigated' : 'cumulative';
 }
 function addRows(rows, name, forcedKind){
   if(!rows.length) return;
@@ -355,7 +356,7 @@ function render(){
   const explPerHost = expl.length/Math.max(totalHosts,1);
 
   // MTTR from mitigated
-  const mttrVals = mit.map(r=> (r.firstSeen&&r.mitigatedDate)? daysBetween(r.firstSeen,r.mitigatedDate):null).filter(v=>v!=null&&v>=0);
+  const mttrVals = mit.map(r=> (r.firstSeen&&r.lastSeen)? daysBetween(r.firstSeen,r.lastSeen):null).filter(v=>v!=null&&v>=0);
   const mttr = mttrVals.length? mttrVals.reduce((a,b)=>a+b,0)/mttrVals.length : null;
 
   // vulnerabilities published more than 1 year ago (by vuln publication date)
@@ -380,7 +381,7 @@ function render(){
       ${kpi('1st seen &gt; 1 yr ago', fmtNum(oldSeen), null, null, 'Open findings first detected in your environment (firstSeen) more than 1 year ago.')}
       ${kpi('Log4j', `<span style="color:var(--crit)">${fmtNum(log4j)}</span>`, null, null, 'Open findings referencing Log4j (plugin name, synopsis, description, CVE, or output).')}
       ${kpi('Mitigated findings', fmtNum(mit.length), null, null, 'Remediated / no-longer-detected findings from the mitigated (patched) export.')}
-      ${kpi('MTTR (last 30d)', mttr!=null? mttr.toFixed(0)+' d':'—', null, null, 'Mean time to remediate: avg days from firstSeen to mitigatedDate, over findings mitigated in the last 30 days. Skews high (long-lived vulns dominate a 30-day window). Calculation under review.')}
+      ${kpi('MTTR (last 30d)', mttr!=null? mttr.toFixed(0)+' d':'—', null, null, 'Mean time to remediate: avg days from firstSeen to lastSeen, over findings in the mitigated export (a ~30-day window of remediations). lastSeen is the real Tenable signal — when the vuln was last detected before it dropped off. Skews high (long-lived vulns dominate a 30-day window).')}
     </div>`));
 
   // (Exploitable-vulnerability SLA by segment is built at the end — see buildSlaSegment)
@@ -403,7 +404,7 @@ function render(){
   d.appendChild(html(`<div class="panel" id="slaConfig">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
       <h3 style="margin:0">Vulnerabilities past remediation SLA</h3>
-      <button id="slaDaysReset" class="noprint" style="font-size:12px;padding:5px 11px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);cursor:pointer">Reset SLAs</button>
+      <button id="slaDaysReset" class="noprint" style="font-size:12px;padding:5px 11px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);cursor:pointer">Reset</button>
     </div>
     <p class="sub" style="margin-top:8px">Aging measured from vulnerability publish date (vulnPubDate).</p>
     <p class="sub"><b style="color:var(--accent)">Edit the day values below</b> to set your remediation SLA per severity — every metric recalculates instantly:</p>
@@ -448,7 +449,7 @@ function render(){
   d.appendChild(html(`<div class="panel">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
       <h3 style="margin:0">KPI - Exploitable vulnerability SLA by segment</h3>
-      <button id="slaReset" class="noprint" style="font-size:12px;padding:5px 11px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);cursor:pointer">Reset values</button>
+      <button id="slaReset" class="noprint" style="font-size:12px;padding:5px 11px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);cursor:pointer">Reset</button>
     </div>
     <table style="margin-top:12px"><thead><tr><th>Segment</th><th class="num">Assets</th><th class="num">Exploitable open</th>
     <th class="num">Per asset</th><th class="num">% of SLA</th><th>Status</th><th class="num">Non-exploitable</th>
@@ -469,7 +470,7 @@ function render(){
       <td class="num">${wifInput(i,'mitE',r.mitE)}</td></tr>`).join('')}
     </tbody></table>
     <p class="sub"><b style="color:var(--accent)">SLA target: 0.25</b> — an average of no more than 0.25 vulnerabilities past SLA per system (Past SLA ÷ IP ≤ 0.25). Anything above 0.25 is over SLA.</p>
-    <p class="sub noprint">Heat-mapped what-if: Per asset and % of SLA cells shade green→red by SLA pressure. Edit Assets, Exploitable open, Non-exploitable or Exploitable mitigated to recalculate live. "Reset values" restores the data.</p>
+    <p class="sub noprint">Heat-mapped what-if: Per asset and % of SLA cells shade green→red by SLA pressure. Edit Assets, Exploitable open, Non-exploitable or Exploitable mitigated to recalculate live. "Reset" restores the data.</p>
     </div>`));
   const slaOrig = slaRows.map(r=>({h:r.h,e:r.e,non:r.non,mitE:r.mitE}));
   const wifVal = (i,k)=>{ const el=d.querySelector(`.wif[data-i="${i}"][data-k="${k}"]`); const v=parseFloat(el.value); return isNaN(v)?0:v; };
@@ -627,25 +628,20 @@ function render(){
     osSeries.forEach(([l,k],idx)=>{ ch.data.datasets[idx].data = osOrder.map(o=>oc[k][o]||0); });
     ch.update('none'); };
 
-  // remediation trend
+  // mitigated-by-month (kept for export only; chart removed)
   const byMonth = {};
-  mit.forEach(r=>{ if(r.mitigatedDate){ const m=String(r.mitigatedDate).slice(0,7); byMonth[m]=(byMonth[m]||0)+1; }});
-  const months = Object.keys(byMonth).sort();
-  if(months.length){
-    d.appendChild(html(`<div class="panel"><h3>Remediation throughput (mitigated by month)</h3><div class="chartbox"><canvas id="cTrend"></canvas></div></div>`));
-    line('cTrend', months, months.map(m=>byMonth[m]));
-  }
+  mit.forEach(r=>{ if(r.lastSeen){ const m=String(r.lastSeen).slice(0,7); byMonth[m]=(byMonth[m]||0)+1; }});
 
   // most exposed hosts
   const hostData = sev => { const m={};
-    (sev==='all'?expl:expl.filter(r=>r.severity===sev)).forEach(r=>{ const h=r.dnsName||r.ip;
+    cum.filter(r=>pastSla(r) && (sev==='all'||r.severity===sev)).forEach(r=>{ const h=r.dnsName||r.ip;
       (m[h]=m[h]||{n:0,bu:bu(r),os:r.operatingSystem,ip:r.ip}).n++; });
     return Object.entries(m).sort((a,b)=>b[1].n-a[1].n); };
   const topHosts = hostData('all').slice(0,12);
   const hMax = Math.max(hostData('all').length,1); const hLabel = v=>v>=hMax?'ALL':v;
   d.appendChild(html(`<div class="panel">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-      <h3 style="margin:0">Most-exposed hosts (by exploitable findings)</h3>
+      <h3 style="margin:0">Most-exposed hosts (by vulnerabilities past SLA)</h3>
       <label class="sub noprint" style="display:flex;align-items:center;gap:10px">
         <select id="hostSev" class="hostinput" style="width:auto;text-align:left" title="Filter by Tenable severity">
           <option value="all">All severities</option>
@@ -658,11 +654,13 @@ function render(){
         <span id="hostOf" style="color:var(--muted)">of ${hostData('all').length}</span></label>
     </div>
     <div id="hostWrap" class="scrollwrap" style="margin-top:12px">
-    <table><thead><tr><th>Host</th><th>Segment</th><th>OS</th><th>IP</th><th class="num">Exploitable</th></tr></thead><tbody id="hostBody"></tbody></table></div></div>`));
+    <table><thead><tr><th>Host</th><th>Segment</th><th>OS</th><th>IP</th><th class="num">Past SLA</th></tr></thead><tbody id="hostBody"></tbody></table></div></div>`));
+  const sevR={Critical:4,High:3,Medium:2,Low:1,Info:0};
   function fillHosts(){
     const data = hostData(STATE.hostsSev);
     const ofEl=document.getElementById('hostOf'); if(ofEl) ofEl.textContent='of '+data.length;
-    document.getElementById('hostBody').innerHTML = data.slice(0, Math.min(STATE.hostsN,hMax)).map(([h,o])=>`<tr><td>${h}</td><td>${o.bu}</td>
+    document.getElementById('hostBody').innerHTML = data.slice(0, Math.min(STATE.hostsN,hMax)).map(([h,o])=>`<tr class="hostrow" data-host="${h}" style="cursor:pointer">
+      <td><span class="chev" style="display:inline-block;width:12px;color:var(--muted)">▸</span>${h}</td><td>${o.bu}</td>
       <td style="font-size:12px">${(o.os||'').replace('Microsoft ','')}</td><td style="font-size:12px">${o.ip||''}</td>
       <td class="num">${fmtNum(o.n)}</td></tr>`).join('');
     const wrap=document.getElementById('hostWrap'), tb=document.getElementById('hostBody'), rs=tb.querySelectorAll('tr');
@@ -670,6 +668,28 @@ function render(){
       for(let i=0;i<5;i++) h+=rs[i].offsetHeight; wrap.style.maxHeight=(h+2)+'px'; }
     else wrap.style.maxHeight='';
   }
+  function hostDetailHTML(h){
+    const sev=STATE.hostsSev;
+    const rows=cum.filter(r=>(r.dnsName||r.ip)===h && (sev==='all'||r.severity===sev))
+      .sort((a,b)=>(sevR[b.severity]||0)-(sevR[a.severity]||0) || (String(a.pluginName)>String(b.pluginName)?1:-1));
+    const inner=rows.map(r=>`<tr>
+      <td class="sev-${r.severity}" style="white-space:nowrap">${r.severity}</td>
+      <td>${r.pluginName}</td><td style="font-size:12px">${r.cve||'—'}</td>
+      <td style="font-size:12px">${r.port}/${r.protocol}</td>
+      <td>${isExpl(r)?'<span class="pill over">Exploit</span>':'—'}</td>
+      <td>${pastSla(r)?'<span class="pill over">Past SLA</span>':'<span class="pill ok">Within</span>'}</td></tr>`).join('');
+    return `<tr class="hostdetail"><td colspan="5" style="background:var(--panel2);padding:0">
+      <div style="padding:8px 12px 10px 26px">
+        <div class="sub" style="margin:0 0 6px">${rows.length} open finding${rows.length===1?'':'s'} on ${h}${sev!=='all'?' · '+sev:''}</div>
+        <table style="font-size:13px"><thead><tr><th>Severity</th><th>Plugin</th><th>CVE</th><th>Port</th><th>Exploit</th><th>SLA</th></tr></thead>
+        <tbody>${inner}</tbody></table></div></td></tr>`;
+  }
+  document.getElementById('hostBody').addEventListener('click', e=>{
+    const row=e.target.closest('tr.hostrow'); if(!row) return;
+    const chev=row.querySelector('.chev'), next=row.nextElementSibling;
+    if(next && next.classList.contains('hostdetail')){ next.remove(); if(chev) chev.textContent='▸'; }
+    else { row.insertAdjacentHTML('afterend', hostDetailHTML(row.dataset.host)); if(chev) chev.textContent='▾'; }
+  });
   fillHosts();
   document.getElementById('hostN').addEventListener('input', e=>{ const v=Math.max(1,Math.min(parseInt(e.target.value)||1,hMax));
     STATE.hostsN=v; document.getElementById('hostNval').textContent=hLabel(v); fillHosts(); });
@@ -849,7 +869,6 @@ const PANEL_TIPS = {
   'Exploitable vulnerabilities by SLA, and segment':'Per-segment exploitable findings vs the per-segment SLA threshold (assets × 0.25).',
   'Top vulnerabilities past SLA':'Top plugins among findings past their remediation SLA. Filter by severity and choose how many to show.',
   'Vulnerabilities by operating system and SLA status':'Open findings per operating system, stacked by within-SLA and past-SLA (by severity).',
-  'Remediation throughput (mitigated by month)':'Count of mitigated findings per month (from mitigatedDate).',
   'Most-exposed hosts (by exploitable findings)':'Hosts ranked by exploitable finding count. Filter by severity and choose how many to show.'
 };
 function applyPanelTips(){

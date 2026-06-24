@@ -34,9 +34,9 @@ The typical workflow is **two CSV exports from the same Tenable.sc `/analysis` v
 - **Cumulative (open) CSV** — current open vulnerabilities
 - **Mitigated CSV** — remediated / no-longer-detected vulnerabilities
 
-You can also load **one Excel workbook** (`.xlsx`) whose worksheet names include `cumulative` and `mitigated`, or drag in JSON. Files in the generic drop zone are auto-classified (records carrying a `mitigatedDate` are treated as mitigated).
+You can also load **one Excel workbook** (`.xlsx`) whose worksheet names include `cumulative` and `mitigated`, or drag in JSON. Files in the generic drop zone are auto-classified (records with `hasBeenMitigated = Yes` are treated as mitigated).
 
-Expected columns are the standard Tenable.sc `/analysis` `vulndetails` fields (`pluginID`, `pluginName`, `severity`, `exploitAvailable`, `repository`, `ip`, `dnsName`, `operatingSystem`, `firstSeen`, `mitigatedDate`, `vulnPubDate`, `cve`, `vprScore`, …). Extra columns are ignored; missing ones degrade gracefully.
+Expected columns are the standard Tenable.sc `/analysis` `vulndetails` fields (`pluginID`, `pluginName`, `severity`, `exploitAvailable`, `repository`, `ip`, `dnsName`, `operatingSystem`, `firstSeen`, `lastSeen`, `hasBeenMitigated`, `vulnPubDate`, `cve`, `vprScore`, …). Extra columns are ignored; missing ones degrade gracefully. Mitigated findings are identified by `hasBeenMitigated`, and remediation timing uses `lastSeen` (Tenable.sc doesn't export a literal remediation timestamp).
 
 ## Try it
 
