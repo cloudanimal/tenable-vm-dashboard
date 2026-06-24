@@ -24,7 +24,8 @@ Security teams often can't push raw scan data to a third-party tool — it's sen
 - **Jump-to-section** menu for quick navigation.
 - **Light / dark mode** plus **color-blind-safe palettes** (Deuteranopia / Protanopia / Tritanopia) with light- and dark-tuned variants.
 - **Configurable SLA** day targets that drive every past-SLA metric live.
-- **Exports** — full report (HTML/PDF), executive Markdown, SLA summary (CSV/XLSX), top vulns, exposed hosts, breakdowns, all-summaries workbook, metrics JSON, and the full datasets. Each chart also saves as JPEG/PNG/WEBP.
+- **Exports** — full report (HTML/PDF), executive Markdown, SLA summary (CSV/XLSX), top vulns, exposed hosts, breakdowns, all-summaries workbook, metrics JSON, and the full datasets.
+- **Save any card as an image** — every larger card (charts, the SLA matrix, heat-map, top vulns, most-exposed hosts) has a **Save** control: PNG, JPEG, WEBP, GIF, or straight to the **clipboard**. Table cards are rasterized in-browser (html2canvas), so it stays fully offline.
 - **Dynamic** — any number of business segments renders automatically (it reads the distinct `repository` values from your data).
 
 ## Input formats
@@ -61,7 +62,7 @@ Uploading your own files works even from `file://`; only the bundled **Load samp
 
 ## Tech
 
-Single static `index.html`, no build step. [SheetJS](https://sheetjs.com) (XLSX/CSV), [PapaParse](https://www.papaparse.com) (fast CSV), and [Chart.js](https://www.chartjs.org) (charts) are **vendored in `vendor/`**, so there is no external CDN dependency and the page works offline.
+Single static `index.html`, no build step. [SheetJS](https://sheetjs.com) (XLSX/CSV), [PapaParse](https://www.papaparse.com) (fast CSV), [Chart.js](https://www.chartjs.org) (charts), [html2canvas](https://html2canvas.hertzen.com) (rasterize cards to images), and [gifenc](https://github.com/mattdesl/gifenc) (GIF encoding) are all **vendored in `vendor/`**, so there is no external CDN dependency and the page works offline.
 
 ## Screenshots
 

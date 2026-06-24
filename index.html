@@ -7,6 +7,8 @@
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/papaparse.min.js"></script>
 <script src="vendor/chart.umd.js"></script>
+<script src="vendor/html2canvas.min.js"></script>
+<script src="vendor/gifenc.global.js"></script>
 <style>
   :root{
     --bg:#0f1117; --panel:#171a23; --panel2:#1f2330; --line:#2a2f3e; --txt:#e7e9ee;
@@ -57,6 +59,12 @@
   .savewrap select,.savewrap button{font-size:11px;padding:4px 8px;border-radius:6px;
     background:var(--panel2);border:1px solid var(--line);color:var(--txt);cursor:pointer}
   .savewrap button:hover{border-color:var(--accent)}
+  .savewrap.savebottom{position:static;justify-content:flex-end;margin-top:12px}
+  .savewrap .saving{opacity:.6;pointer-events:none}
+  .toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);background:#0d0f14;color:#fff;
+    border:1px solid var(--line);border-radius:8px;padding:9px 16px;font-size:13px;z-index:200;
+    opacity:0;transition:opacity .2s ease;pointer-events:none}
+  .toast.show{opacity:1}
   .panel > h3{padding-right:150px}
   .panel h3{margin:0 0 14px;font-size:15px;font-weight:600}
   table{width:100%;border-collapse:collapse;font-size:13px}
@@ -672,8 +680,8 @@ function render(){
       <td style="font-size:12px">${(o.os||'').replace('Microsoft ','')}</td><td style="font-size:12px">${o.ip||''}</td>
       <td class="num">${fmtNum(o.n)}</td></tr>`).join('');
     const wrap=document.getElementById('hostWrap'), tb=document.getElementById('hostBody'), rs=tb.querySelectorAll('tr');
-    if(rs.length>5){ const th=wrap.querySelector('thead'); let h=th?th.offsetHeight:0;
-      for(let i=0;i<5;i++) h+=rs[i].offsetHeight; wrap.style.maxHeight=(h+2)+'px'; }
+    if(rs.length>10){ const th=wrap.querySelector('thead'); let h=th?th.offsetHeight:0;
+      for(let i=0;i<10;i++) h+=rs[i].offsetHeight; wrap.style.maxHeight=(h+2)+'px'; }
     else wrap.style.maxHeight='';
   }
   function hostDetailHTML(h){
@@ -705,16 +713,19 @@ function render(){
   document.getElementById('hostSev').addEventListener('change', e=>{ STATE.hostsSev=e.target.value; fillHosts(); });
 
 
-  // per-chart save control: format picker (default JPEG) + Save button
+  // per-panel save control on every larger card (charts + tables): format picker + Save button
   d.querySelectorAll('.panel').forEach(p=>{
-    if(!p.querySelector('canvas')) return;
+    const isChart = !!p.querySelector('canvas');
+    if(!isChart && !p.querySelector('table')) return;          // only the larger report cards
+    if(p.querySelector('.savewrap')) return;
     const h=p.querySelector('h3');
-    const name=(h?h.textContent:'chart').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
-    const wrap=document.createElement('div'); wrap.className='savewrap noprint';
-    const sel=document.createElement('select'); sel.title='Image format';
-    [['jpeg','JPEG'],['png','PNG'],['webp','WEBP']].forEach(([v,l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; sel.appendChild(o); });
-    const b=document.createElement('button'); b.textContent='Save'; b.title='Save this chart as an image';
-    b.addEventListener('click', ()=>savePanel(p, name, sel.value));
+    const name=(h?h.textContent:'panel').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+    const wrap=document.createElement('div'); wrap.className='savewrap noprint'+(isChart?'':' savebottom');
+    const sel=document.createElement('select'); sel.title='Save as';
+    [['png','PNG'],['jpeg','JPEG'],['webp','WEBP'],['gif','GIF'],['clipboard','Clipboard']]
+      .forEach(([v,l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; sel.appendChild(o); });
+    const b=document.createElement('button'); b.textContent='Save'; b.title='Save this card as an image';
+    b.addEventListener('click', ()=>savePanel(p, name, sel.value, b));
     wrap.appendChild(sel); wrap.appendChild(b); p.appendChild(wrap);
   });
 
@@ -736,19 +747,59 @@ function render(){
   };
 }
 
-// ---------- save a chart visual as an image (from its canvas) ----------
-function savePanel(el, name, fmt){
-  const cv = el.querySelector('canvas'); if(!cv) return;
-  fmt = fmt || 'jpeg';
-  const bg = getComputedStyle(document.documentElement).getPropertyValue('--panel').trim() || '#171a23';
-  const tmp = document.createElement('canvas'); tmp.width=cv.width; tmp.height=cv.height;
-  const ctx = tmp.getContext('2d');
-  ctx.fillStyle = bg; ctx.fillRect(0,0,tmp.width,tmp.height); ctx.drawImage(cv,0,0);
-  const mime = 'image/'+fmt;
-  const url = tmp.toDataURL(mime, fmt==='jpeg'||fmt==='webp'?0.92:undefined);
-  const ext = fmt==='jpeg'?'jpg':fmt;
-  const a=document.createElement('a'); a.href=url;
-  a.download=(name||'visual')+'_'+new Date().toISOString().slice(0,10)+'.'+ext; a.click();
+// ---------- save a card as an image (chart canvas fast-path, or html2canvas for HTML cards) ----------
+function panelBg(){ return getComputedStyle(document.documentElement).getPropertyValue('--panel').trim() || '#171a23'; }
+
+function toast(msg){ let t=document.querySelector('.toast'); if(!t){ t=document.createElement('div'); t.className='toast'; document.body.appendChild(t); }
+  t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),1800); }
+
+// Rasterize a panel to a canvas. Charts (single canvas, no table) use the live canvas; HTML cards use html2canvas (this panel only).
+async function rasterPanel(el){
+  const bg = panelBg();
+  const cv = el.querySelector('canvas');
+  if(cv && el.querySelectorAll('canvas').length===1 && !el.querySelector('table')){
+    const tmp=document.createElement('canvas'); tmp.width=cv.width; tmp.height=cv.height;
+    const ctx=tmp.getContext('2d'); ctx.fillStyle=bg; ctx.fillRect(0,0,tmp.width,tmp.height); ctx.drawImage(cv,0,0);
+    return tmp;
+  }
+  // HTML card: hide interactive controls (.noprint) + un-clip scroll regions so the full card renders cleanly
+  const hidden=[...el.querySelectorAll('.noprint')]; const vis=hidden.map(n=>n.style.visibility); hidden.forEach(n=>n.style.visibility='hidden');
+  const scrolls=[...el.querySelectorAll('.scrollwrap')]; const maxes=scrolls.map(s=>s.style.maxHeight); scrolls.forEach(s=>s.style.maxHeight='none');
+  let canvas;
+  try{ canvas = await html2canvas(el, {backgroundColor:bg, scale:2, logging:false, useCORS:true}); }
+  finally{ scrolls.forEach((s,i)=>s.style.maxHeight=maxes[i]); hidden.forEach((n,i)=>n.style.visibility=vis[i]); }
+  return canvas;
+}
+
+function canvasToBlob(canvas, mime, q){ return new Promise(res=>canvas.toBlob(res, mime, q)); }
+function dlBlob(blob, filename){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
+
+function canvasToGifBlob(canvas){
+  const g=window.gifenc; const {width,height}=canvas;
+  const data=canvas.getContext('2d').getImageData(0,0,width,height).data;
+  const palette=g.quantize(data,256); const index=g.applyPalette(data,palette);
+  const enc=g.GIFEncoder(); enc.writeFrame(index,width,height,{palette}); enc.finish();
+  return new Blob([enc.bytesView()],{type:'image/gif'});
+}
+
+async function savePanel(el, name, fmt, btn){
+  fmt = fmt || 'png';
+  const stamp=new Date().toISOString().slice(0,10);
+  if(btn){ btn.classList.add('saving'); btn.textContent='…'; }
+  try{
+    const canvas = await rasterPanel(el);
+    if(fmt==='clipboard'){
+      if(!(navigator.clipboard && window.ClipboardItem)){ toast('Clipboard not supported here'); return; }
+      const blob=await canvasToBlob(canvas,'image/png');
+      await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+      toast('Copied to clipboard'); return;
+    }
+    if(fmt==='gif'){ dlBlob(canvasToGifBlob(canvas), (name||'card')+'_'+stamp+'.gif'); return; }
+    const mime='image/'+fmt; const q=(fmt==='jpeg'||fmt==='webp')?0.95:undefined;
+    const blob=await canvasToBlob(canvas, mime, q);
+    dlBlob(blob, (name||'card')+'_'+stamp+'.'+(fmt==='jpeg'?'jpg':fmt));
+  }catch(err){ console.error('savePanel', err); toast('Save failed'); }
+  finally{ if(btn){ btn.classList.remove('saving'); btn.textContent='Save'; } }
 }
 
 // ---------- export ----------
