@@ -12,7 +12,7 @@ Security teams often can't push raw scan data to a third-party tool — it's sen
 
 ## What it reports
 
-- **Executive KPIs** — IP addresses, total vulnerabilities, total exploitable, total/avg past-SLA, published > 1yr, first-seen > 1yr, Log4j, mitigated count, MTTR. Each card has a hover tooltip explaining its calculation.
+- **Executive KPIs** — IP addresses, total vulnerabilities, total exploitable, total/avg past-SLA, published > 1yr, first-seen > 1yr, Log4j, mitigated count, and median open age. Each card has a hover tooltip explaining its calculation.
 - **Vulnerabilities past remediation SLA** — configurable per-severity day targets (aged from `vulnPubDate`); total and per-severity past-SLA counts and per-system averages. *Every metric recalculates live as you edit the targets.*
 - **Exploitable-vulnerability SLA by segment** — editable what-if table: exploitable findings per asset vs a **0.25 SLA** (avg ≤ 0.25 past-SLA vulns per system), heat-shaded by SLA pressure, with an editable "ALL" rollup.
 - **Vulnerabilities past remediation SLA by segment** — a plugin × segment matrix of past-SLA findings, driven by the SLA targets.
@@ -38,6 +38,12 @@ You can also load **one Excel workbook** (`.xlsx`) whose worksheet names include
 
 Expected columns are the standard Tenable.sc `/analysis` `vulndetails` fields (`pluginID`, `pluginName`, `severity`, `exploitAvailable`, `repository`, `ip`, `dnsName`, `operatingSystem`, `firstSeen`, `lastSeen`, `hasBeenMitigated`, `vulnPubDate`, `cve`, `vprScore`, …). Extra columns are ignored; missing ones degrade gracefully. Mitigated findings are identified by `hasBeenMitigated`, and remediation timing uses `lastSeen` (Tenable.sc doesn't export a literal remediation timestamp).
 
+## Documentation
+
+- **[docs/data-model.md](docs/data-model.md)** — the Tenable.sc `/analysis` schema, cumulative vs patched, and how mitigation is classified.
+- **[docs/methodology.md](docs/methodology.md)** — how every metric is computed, the SLA model, and the MTTR caveats.
+- **[docs/roadmap.md](docs/roadmap.md)** — planned features (month-over-month diff, agent-coverage report, companion API fetcher).
+
 ## Try it
 
 Click **Load sample data**, or upload [`sample-data/Tenable_SC_VulnDetail_Sample.xlsx`](sample-data/Tenable_SC_VulnDetail_Sample.xlsx) — a fully synthetic dataset (18,000 hosts across 5 segments, ~6.7k open + ~11.8k mitigated findings).
@@ -59,11 +65,15 @@ Single static `index.html`, no build step. [SheetJS](https://sheetjs.com) (XLSX/
 
 ## Screenshots
 
-_Add screenshots/GIF here (e.g. under `docs/`) — the dark and light themes and the SLA views photograph well._
+The full dashboard on the bundled sample data (dark theme) — executive KPIs and SLA aging, the exploitable-SLA-by-segment heat-map, the plugin × segment past-SLA matrix, severity / segment / OS charts, and most-exposed hosts (rows expand to show each host's findings):
+
+![Tenable VM dashboard rendered on the synthetic sample dataset](docs/screenshots/dashboard.png)
+
+> Generated reproducibly from the bundled sample data via `?autosample=1` — see [docs/screenshots/README.md](docs/screenshots/README.md).
 
 ## Note
 
-The bundled sample data is entirely synthetic and does not represent any real organization or environment. MTTR and the per-asset SLA are approximations bounded by what the two exports contain (e.g. the mitigated export is typically a recent window).
+The bundled sample data is entirely synthetic and does not represent any real organization or environment. The per-asset SLA and open-age metrics are approximations bounded by what the exports contain. A true remediation-time MTTR isn't shown, because Tenable.sc exports no remediation timestamp and the mitigated export is only a recent window — it needs two scans (planned compare mode). See [docs/methodology.md](docs/methodology.md).
 
 ## License
 

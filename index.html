@@ -245,6 +245,8 @@ $('#fileCum').addEventListener('change', e=>handleFiles(e.target.files,'cumulati
 $('#fileMit').addEventListener('change', e=>handleFiles(e.target.files,'mitigated'));
 $('#fileWb').addEventListener('change', e=>handleFiles(e.target.files));
 $('#loadSample').addEventListener('click', loadSample);
+// Convenience: ?autosample=1 loads the bundled sample on page load (handy for demo links / screenshots).
+if(/[?&]autosample=1/.test(location.search)) window.addEventListener('load', loadSample);
 $('#reset').addEventListener('click', ()=>location.reload());
 $('#exportBtn').addEventListener('click', ()=>doExport($('#exportSel').value));
 $('#jumpSel').addEventListener('change', e=>{ if(e.target.value){ const el=document.getElementById(e.target.value);
@@ -355,9 +357,15 @@ function render(){
   const ipCount = new Set([...cum, ...mit].map(r=>r.ip).filter(Boolean)).size;
   const explPerHost = expl.length/Math.max(totalHosts,1);
 
-  // MTTR from mitigated
+  // MTTR from mitigated (kept for export; not shown — a 30-day mitigated window can't yield a true org MTTR)
   const mttrVals = mit.map(r=> (r.firstSeen&&r.lastSeen)? daysBetween(r.firstSeen,r.lastSeen):null).filter(v=>v!=null&&v>=0);
   const mttr = mttrVals.length? mttrVals.reduce((a,b)=>a+b,0)/mttrVals.length : null;
+
+  // Open age: how long currently-open findings have been open (now − firstSeen). Honest single-export backlog metric.
+  const openAgeVals = cum.map(r=> r.firstSeen? daysBetween(r.firstSeen, Date.now()):null).filter(v=>v!=null&&v>=0).sort((a,b)=>a-b);
+  const median = a => a.length? (a.length%2? a[(a.length-1)/2] : (a[a.length/2-1]+a[a.length/2])/2) : null;
+  const openAgeMedian = median(openAgeVals);
+  const openAgeMean = openAgeVals.length? openAgeVals.reduce((a,b)=>a+b,0)/openAgeVals.length : null;
 
   // vulnerabilities published more than 1 year ago (by vuln publication date)
   const oneYrAgo = Date.now() - 365*86400000;
@@ -381,7 +389,7 @@ function render(){
       ${kpi('1st seen &gt; 1 yr ago', fmtNum(oldSeen), null, null, 'Open findings first detected in your environment (firstSeen) more than 1 year ago.')}
       ${kpi('Log4j', `<span style="color:var(--crit)">${fmtNum(log4j)}</span>`, null, null, 'Open findings referencing Log4j (plugin name, synopsis, description, CVE, or output).')}
       ${kpi('Mitigated findings', fmtNum(mit.length), null, null, 'Remediated / no-longer-detected findings from the mitigated (patched) export.')}
-      ${kpi('MTTR (last 30d)', mttr!=null? mttr.toFixed(0)+' d':'—', null, null, 'Mean time to remediate: avg days from firstSeen to lastSeen, over findings in the mitigated export (a ~30-day window of remediations). lastSeen is the real Tenable signal — when the vuln was last detected before it dropped off. Skews high (long-lived vulns dominate a 30-day window).')}
+      ${kpi('Open age (median)', openAgeMedian!=null? Math.round(openAgeMedian)+' d':'—', null, null, `How long currently-open findings have been open: median of (today − firstSeen) across the open dataset. Mean is ${openAgeMean!=null?Math.round(openAgeMean)+' d':'n/a'} (pulled up by a long tail). This is a backlog-age metric, not remediation time — a true MTTR needs two scans (compare mode) since Tenable.sc exports no remediation timestamp.`)}
     </div>`));
 
   // (Exploitable-vulnerability SLA by segment is built at the end — see buildSlaSegment)
