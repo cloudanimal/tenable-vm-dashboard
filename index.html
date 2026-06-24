@@ -517,7 +517,7 @@ function render(){
   const computeP = () => { const pmap={};
     cum.forEach(r=>{ if(!pastSla(r)) return; const p=r.pluginName||'(unknown)';
       (pmap[p]=pmap[p]||{sev:r.severity,total:0,by:{}}); pmap[p].by[bu(r)]=(pmap[p].by[bu(r)]||0)+1; pmap[p].total++; });
-    pRows = Object.entries(pmap).sort((a,b)=> (sevRank[b[1].sev]||0)-(sevRank[a[1].sev]||0) || b[1].total-a[1].total); };
+    pRows = Object.entries(pmap).sort((a,b)=> b[1].total-a[1].total || (sevRank[b[1].sev]||0)-(sevRank[a[1].sev]||0)); };
   computeP();
   const plugRow = ([name,o])=>`<tr><td>${name}</td><td class="sev-${o.sev}">${o.sev}</td>
     ${buses.map(b=>`<td class="num">${o.by[b]?fmtNum(o.by[b]):'<span style="color:var(--muted)">—</span>'}</td>`).join('')}
@@ -535,7 +535,7 @@ function render(){
     <table><thead><tr><th>Plugin</th><th>Severity</th>
       ${buses.map(b=>`<th class="num">${segShort(b)}</th>`).join('')}<th class="num">Total</th></tr></thead>
     <tbody id="summaryBody"></tbody></table></div>
-    <p class="sub noprint">Open findings past their remediation SLA per Tenable plugin across segments — driven by the SLA day targets above (sorted by severity, then volume).</p></div>`));
+    <p class="sub noprint">Open findings past their remediation SLA per Tenable plugin across segments — driven by the SLA day targets above (sorted by Total, greatest to smallest).</p></div>`));
   const fillSummary = ()=>{ const n=Math.min(STATE.summaryN,sMax); const vis=pRows.slice(0,n);
     const segTot={}; buses.forEach(b=>segTot[b]=0); let grand=0;
     vis.forEach(([name,o])=>{ buses.forEach(b=>segTot[b]+=(o.by[b]||0)); grand+=o.total; });
