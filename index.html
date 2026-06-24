@@ -72,22 +72,39 @@
   </div>
   <div class="row noprint">
     <span class="priv">&#128274; 100% local — your data never leaves this browser</span>
-    <button class="btn ghost" id="exportPdf">Export PDF</button>
-    <button class="btn ghost" id="exportCsv">Export CSV</button>
+    <select id="exportSel" class="hostinput" style="width:auto;padding:8px 10px">
+      <option value="report-pdf">Full report (PDF / print)</option>
+      <option value="exec-md">Executive report (Markdown)</option>
+      <option value="sla-csv">SLA summary (CSV)</option>
+      <option value="sla-xlsx">SLA summary (XLSX)</option>
+      <option value="topvulns-csv">Top exploitable vulns (CSV)</option>
+      <option value="hosts-csv">Most-exposed hosts (CSV)</option>
+      <option value="breakdowns-csv">Severity / OS / cloud breakdowns (CSV)</option>
+      <option value="all-xlsx">All summaries (multi-sheet XLSX)</option>
+      <option value="metrics-json">Computed metrics (JSON)</option>
+      <option value="open-csv">Full open dataset (CSV)</option>
+      <option value="mit-csv">Full mitigated dataset (CSV)</option>
+    </select>
+    <button class="btn ghost" id="exportBtn">Export</button>
     <button class="btn ghost" id="reset">Reset</button>
   </div>
 </header>
 <main>
   <section id="uploader">
     <div class="drop" id="drop">
-      <h2>Drop your Tenable data here</h2>
-      <p>An Excel workbook with <b>cumulative</b> + <b>mitigated</b> worksheets, or separate CSV / JSON files.</p>
-      <p>Cumulative = open vulns (sourceType=cumulative). Mitigated = remediated (has <code>mitigatedDate</code>).</p>
+      <h2>Load your Tenable SC analysis exports</h2>
+      <p>Two CSV exports from the <code>/analysis</code> vulndetails view — one with <b>sourceType=cumulative</b> (open),
+         one with <b>sourceType=patched</b> (mitigated). Or a single Excel workbook with both sheets.</p>
       <div class="row">
-        <button class="btn" id="pick">Choose files</button>
+        <button class="btn" id="pickCum">Cumulative (open) CSV</button>
+        <button class="btn" id="pickMit">Mitigated CSV</button>
+        <button class="btn ghost" id="pickWb">Workbook (.xlsx)</button>
         <button class="btn ghost" id="loadSample">Load sample data</button>
       </div>
-      <input type="file" id="file" multiple accept=".xlsx,.xls,.csv,.json" class="hidden" />
+      <p id="loadState" class="sub" style="margin-top:12px"></p>
+      <input type="file" id="fileCum" accept=".csv,.json" class="hidden" />
+      <input type="file" id="fileMit" accept=".csv,.json" class="hidden" />
+      <input type="file" id="fileWb" multiple accept=".xlsx,.xls,.csv,.json" class="hidden" />
     </div>
   </section>
   <section id="dashboard" class="hidden"></section>
@@ -107,12 +124,17 @@ const drop = $('#drop');
 ['dragover','dragenter'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('hover')}));
 ['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('hover')}));
 drop.addEventListener('drop', ev => handleFiles(ev.dataTransfer.files));
-$('#pick').addEventListener('click', ()=>$('#file').click());
-$('#file').addEventListener('change', e=>handleFiles(e.target.files));
+$('#pickCum').addEventListener('click', ()=>$('#fileCum').click());
+$('#pickMit').addEventListener('click', ()=>$('#fileMit').click());
+$('#pickWb').addEventListener('click', ()=>$('#fileWb').click());
+$('#fileCum').addEventListener('change', e=>handleFiles(e.target.files,'cumulative'));
+$('#fileMit').addEventListener('change', e=>handleFiles(e.target.files,'mitigated'));
+$('#fileWb').addEventListener('change', e=>handleFiles(e.target.files));
 $('#loadSample').addEventListener('click', loadSample);
 $('#reset').addEventListener('click', ()=>location.reload());
-$('#exportPdf').addEventListener('click', ()=>window.print());
-$('#exportCsv').addEventListener('click', exportCsv);
+$('#exportBtn').addEventListener('click', ()=>doExport($('#exportSel').value));
+function setState(){ const s=$('#loadState'); if(s) s.textContent =
+  `Loaded: ${STATE.cumulative.length} open · ${STATE.mitigated.length} mitigated`; }
 
 function isDataSheet(rows){
   return rows.length && rows.some(r => ('pluginID' in r) || ('exploitAvailable' in r) || ('severity' in r));
@@ -123,12 +145,12 @@ function classify(rows, name){
   if(n.includes('cumulat') || n.includes('vuln')) return rows.some(r=>r.mitigatedDate)?'mitigated':'cumulative';
   return rows.some(r=>r.mitigatedDate || String(r.hasBeenMitigated).toLowerCase()==='yes') ? 'mitigated' : 'cumulative';
 }
-function addRows(rows, name){
+function addRows(rows, name, forcedKind){
   if(!rows.length) return;
-  const kind = classify(rows, name);
+  const kind = forcedKind || classify(rows, name);
   STATE[kind] = STATE[kind].concat(rows);
 }
-async function handleFiles(fileList){
+async function handleFiles(fileList, forcedKind){
   for(const f of fileList){
     const ext = f.name.split('.').pop().toLowerCase();
     if(ext==='xlsx'||ext==='xls'){
@@ -139,13 +161,14 @@ async function handleFiles(fileList){
       });
     } else if(ext==='csv'){
       const wb = XLSX.read(await f.text(), {type:'string'});
-      addRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:''}), f.name);
+      addRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:''}), f.name, forcedKind);
     } else if(ext==='json'){
       let data = JSON.parse(await f.text());
       if(!Array.isArray(data)) data = data.results || data.response?.results || [];
-      addRows(data, f.name);
+      addRows(data, f.name, forcedKind);
     }
   }
+  setState();
   if(STATE.cumulative.length || STATE.mitigated.length) render();
 }
 async function loadSample(){
@@ -282,7 +305,69 @@ function render(){
       <td class="num">${o.n}</td></tr>`).join('')}
     </tbody></table></div>`));
 
-  window._slaRows = slaRows; // for CSV export
+  window._report = {
+    sla: slaRows,
+    metrics: { totalHosts, openFindings: cum.length, exploitableOpen: expl.length,
+      exploitablePerAsset: +explPerHost.toFixed(4), sla: SLA, pctOfSla: Math.round(explPerHost/SLA*100),
+      mitigated: mit.length, remediationRatePct: +remRate.toFixed(1), mttrDays: mttr!=null?+mttr.toFixed(1):null },
+    topVulns: topExpl.map(([name,rows])=>({plugin:name, pluginID:rows[0].pluginID, severity:rows[0].severity,
+      cve:rows[0].cve, exploitFrameworks:rows[0].exploitFrameworks, instances:rows.length, hosts:uniqHosts(rows)})),
+    hosts: topHosts.map(([h,o])=>({host:h, bu:o.bu, os:o.os, ip:o.ip, exploitable:o.n})),
+    severity: sevCount, os: osC, cloud: clC, byMonth,
+    cumulative: cum, mitigated: mit
+  };
+}
+
+// ---------- export ----------
+function dl(name, text, mime){ const b=new Blob([text],{type:mime||'text/plain'}); const a=document.createElement('a');
+  a.href=URL.createObjectURL(b); a.download=name; a.click(); URL.revokeObjectURL(a.href); }
+function toCsv(headers, rows){ const esc=v=>{ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  return [headers.join(',')].concat(rows.map(r=>r.map(esc).join(','))).join('\n'); }
+function objCsv(objs){ if(!objs.length) return ''; const cols=[...new Set(objs.flatMap(o=>Object.keys(o)))];
+  return toCsv(cols, objs.map(o=>cols.map(c=>o[c]))); }
+function slaTable(){ const r=window._report.sla;
+  return { headers:['business_unit','assets','exploitable_open','exploitable_per_asset','pct_of_sla','status','non_exploitable_open','exploitable_mitigated'],
+    rows:r.map(x=>[x.b,x.h,x.e,x.ratio.toFixed(4),Math.round(x.ratio/SLA*100)+'%',x.over?'Over SLA':'Within SLA',x.non,x.mitE]) }; }
+
+function doExport(kind){
+  const R=window._report; if(!R){ alert('Load data first.'); return; }
+  const stamp=new Date().toISOString().slice(0,10);
+  if(kind==='report-pdf'){ window.print(); return; }
+  if(kind==='sla-csv'){ const t=slaTable(); dl(`sla_summary_${stamp}.csv`, toCsv(t.headers,t.rows), 'text/csv'); return; }
+  if(kind==='topvulns-csv'){ dl(`top_exploitable_vulns_${stamp}.csv`, objCsv(R.topVulns), 'text/csv'); return; }
+  if(kind==='hosts-csv'){ dl(`most_exposed_hosts_${stamp}.csv`, objCsv(R.hosts), 'text/csv'); return; }
+  if(kind==='breakdowns-csv'){
+    const rows=[]; const push=(cat,k,v)=>rows.push([cat,k,v]);
+    Object.entries(R.severity).forEach(([k,v])=>push('severity',k,v));
+    Object.entries(R.os).forEach(([k,v])=>push('operatingSystem (exploitable)',k,v));
+    Object.entries(R.cloud).forEach(([k,v])=>push('cloudProvider (exploitable)',k,v));
+    Object.entries(R.byMonth).forEach(([k,v])=>push('mitigated_by_month',k,v));
+    dl(`breakdowns_${stamp}.csv`, toCsv(['category','key','count'],rows), 'text/csv'); return; }
+  if(kind==='open-csv'){ dl(`cumulative_open_${stamp}.csv`, objCsv(R.cumulative), 'text/csv'); return; }
+  if(kind==='mit-csv'){ dl(`mitigated_${stamp}.csv`, objCsv(R.mitigated), 'text/csv'); return; }
+  if(kind==='metrics-json'){ dl(`vm_metrics_${stamp}.json`, JSON.stringify({metrics:R.metrics, sla:R.sla, severity:R.severity, os:R.os, cloud:R.cloud, byMonth:R.byMonth}, null, 2), 'application/json'); return; }
+  if(kind==='sla-xlsx' || kind==='all-xlsx'){
+    const wb=XLSX.utils.book_new();
+    const t=slaTable(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([t.headers,...t.rows]), 'SLA Summary');
+    if(kind==='all-xlsx'){
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(R.topVulns), 'Top Exploitable');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(R.hosts), 'Most Exposed Hosts');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(Object.entries(R.severity).map(([severity,count])=>({severity,count}))), 'Severity');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([R.metrics]), 'Metrics');
+    }
+    XLSX.writeFile(wb, kind==='all-xlsx'?`vm_report_${stamp}.xlsx`:`sla_summary_${stamp}.xlsx`); return; }
+  if(kind==='exec-md'){
+    const m=R.metrics; const t=slaTable();
+    let md=`# Vulnerability Management Report\n\n_Generated ${stamp} · all analysis performed locally in-browser._\n\n`;
+    md+=`## Executive summary\n\n`;
+    md+=`- Assets analyzed: **${m.totalHosts.toLocaleString()}**\n- Open findings: **${m.openFindings.toLocaleString()}**\n`;
+    md+=`- Exploitable open: **${m.exploitableOpen.toLocaleString()}**\n- Exploitable per asset: **${m.exploitablePerAsset}** (SLA ${m.sla}, ${m.pctOfSla}% of SLA)\n`;
+    md+=`- Mitigated findings: **${m.mitigated.toLocaleString()}**\n- Remediation rate: **${m.remediationRatePct}%**\n- Mean time to remediate: **${m.mttrDays!=null?m.mttrDays+' days':'n/a'}**\n\n`;
+    md+=`## Exploitable-vulnerability SLA by business unit\n\n| ${t.headers.join(' | ')} |\n|${t.headers.map(()=>'---').join('|')}|\n`;
+    t.rows.forEach(r=>md+=`| ${r.join(' | ')} |\n`);
+    md+=`\n## Top exploitable vulnerabilities\n\n| Plugin | Severity | CVE | Instances | Hosts |\n|---|---|---|---|---|\n`;
+    R.topVulns.forEach(v=>md+=`| ${v.plugin} | ${v.severity} | ${v.cve||'—'} | ${v.instances} | ${v.hosts} |\n`);
+    dl(`vm_report_${stamp}.md`, md, 'text/markdown'); return; }
 }
 
 // ---------- chart helpers ----------
@@ -317,17 +402,6 @@ function kpi(l,v,cls,sub){ return `<div class="card"><div class="l">${l}</div>
   <div class="v ${v.length>6?'s':''}">${v}</div>${sub?`<div class="sub" style="color:var(--${cls==='over'?'crit':'ok'})">${sub}</div>`:''}</div>`; }
 function html(s){ const t=document.createElement('template'); t.innerHTML=s.trim(); return t.content.firstChild; }
 
-// ---------- CSV export ----------
-function exportCsv(){
-  if(!window._slaRows) return;
-  const head=['business_unit','assets','exploitable_open','exploitable_per_host','pct_of_sla','status','non_exploitable_open','exploitable_mitigated'];
-  const lines=[head.join(',')];
-  window._slaRows.forEach(r=>lines.push([r.b,r.h,r.e,r.ratio.toFixed(4),Math.round(r.ratio/SLA*100)+'%',
-    r.over?'Over SLA':'Within SLA',r.non,r.mitE].join(',')));
-  const blob=new Blob([lines.join('\n')],{type:'text/csv'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download='tenable_sla_summary.csv'; a.click();
-}
 </script>
 </body>
 </html>

@@ -22,10 +22,12 @@ Security teams often can't push raw scan data to a third-party tool for analysis
 
 ## Input formats
 
-Provide either:
+The typical workflow is **two CSV exports from the same Tenable.sc `/analysis` vulndetails view** — run it once with `sourceType=cumulative` (open) and once with `sourceType=patched` (mitigated), and load each into its labelled button:
 
-1. **One Excel workbook** (`.xlsx`) containing worksheets whose names include **`cumulative`** and **`mitigated`**, or
-2. **Separate CSV or JSON files** — each set is auto-classified (records carrying a `mitigatedDate` are treated as the mitigated database; everything else as cumulative).
+- **Cumulative (open) CSV** — current open vulnerabilities
+- **Mitigated CSV** — remediated / no-longer-detected vulnerabilities
+
+You can also load **one Excel workbook** (`.xlsx`) whose worksheet names include **`cumulative`** and **`mitigated`**, or drag in JSON. Files loaded via the generic drop zone are auto-classified (records carrying a `mitigatedDate` are treated as mitigated; everything else as cumulative).
 
 The columns expected are the standard Tenable.sc `/analysis` `vulndetails` fields (`pluginID`, `pluginName`, `severity`, `exploitAvailable`, `repository`, `ip`, `dnsName`, `operatingSystem`, `cloudProvider`, `firstSeen`, `mitigatedDate`, `cve`, `vprScore`, …). Extra columns are ignored; missing ones degrade gracefully.
 
@@ -35,8 +37,20 @@ Click **Load sample data** on the page, or upload [`sample-data/Tenable_SC_VulnD
 
 ## Export
 
-- **Export PDF** — print-optimized report of the whole dashboard.
-- **Export CSV** — the per-BU SLA summary.
+Pick a preset from the export dropdown:
+
+| Preset | Format |
+|---|---|
+| Full report | PDF (print) |
+| Executive report | Markdown |
+| SLA summary | CSV / XLSX |
+| Top exploitable vulns | CSV |
+| Most-exposed hosts | CSV |
+| Severity / OS / cloud breakdowns | CSV |
+| All summaries | multi-sheet XLSX |
+| Computed metrics | JSON |
+| Full open dataset | CSV |
+| Full mitigated dataset | CSV |
 
 ## Run locally
 
