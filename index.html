@@ -143,6 +143,9 @@
       <option value="report-pdf">Full report (PDF / print)</option>
       <option value="full-csv">Full report (CSV)</option>
       <option value="full-xlsx">Full report (XLSX)</option>
+      <option value="full-csv-clip">Full report (CSV → clipboard)</option>
+      <option value="full-tsv-clip">Full report (Excel paste → clipboard)</option>
+      <option value="full-img-clip">Full report (image → clipboard)</option>
       <option value="exec-md">Executive report (Markdown)</option>
       <option value="sla-csv">SLA summary (CSV)</option>
       <option value="sla-xlsx">SLA summary (XLSX)</option>
@@ -584,54 +587,8 @@ function render(){
     {label:'SLA threshold', data:slaRows.map(r=>Math.round(r.h*SLA)), backgroundColor:PAL().ok}
   ]);
 
-  // top exploitable vulns (adjustable count, default 5) — updates in place, no full re-render
-  const maxN = Math.max(new Set(cum.map(r=>r.pluginName)).size,1);
-  const topLabel = v => v>=maxN ? 'ALL' : v;
-  d.appendChild(html(`<div class="panel">
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-      <h3 style="margin:0">Top vulnerabilities past SLA</h3>
-      <label class="sub noprint" style="display:flex;align-items:center;gap:10px">
-        <select id="topSev" class="hostinput" style="width:auto;text-align:left" title="Filter by Tenable severity">
-          <option value="all">All severities</option>
-          <option value="Critical">Critical</option>
-          <option value="High">High</option>
-          <option value="Medium">Medium</option>
-          <option value="Low">Low</option>
-        </select>
-        Show top
-        <input id="topN" type="range" min="1" max="${maxN}" value="${Math.min(STATE.topN,maxN)}"
-          style="width:130px;accent-color:var(--accent)">
-        <span id="topNval" style="color:var(--txt);font-weight:500;min-width:2.2em;text-align:right">${topLabel(Math.min(STATE.topN,maxN))}</span>
-        <span id="topExplOf" style="color:var(--muted)">of ${new Set(cum.filter(pastSla).map(r=>r.pluginName)).size}</span></label>
-    </div>
-    <div id="topExplWrap" class="scrollwrap" style="margin-top:12px">
-    <table><thead><tr><th>#</th><th>Plugin</th><th>Severity</th><th>CVE</th><th>Exploit framework</th>
-    <th class="num">Instances</th><th class="num">Hosts</th></tr></thead><tbody id="topExplBody"></tbody></table></div></div>`));
-  function fillTopExpl(){
-    const base = cum.filter(pastSla);
-    const src = STATE.topSev==='all' ? base : base.filter(r=>r.severity===STATE.topSev);
-    const distinct = new Set(src.map(r=>r.pluginName)).size;
-    const ofEl=document.getElementById('topExplOf'); if(ofEl) ofEl.textContent='of '+distinct;
-    const t = topBy(src, r=>r.pluginName, STATE.topN);
-    d.querySelector('#topExplBody').innerHTML = t.map(([name,rows],i)=>`<tr>
-      <td>${i+1}</td><td>${name}</td><td class="sev-${rows[0].severity}">${rows[0].severity}</td>
-      <td style="font-size:12px">${(rows[0].cve||'—')}</td>
-      <td style="font-size:12px">${rows[0].exploitFrameworks||'—'}</td>
-      <td class="num">${fmtNum(rows.length)}</td><td class="num">${fmtNum(uniqHosts(rows))}</td></tr>`).join('');
-    // limit the visible viewport to ~5 rows; scroll for the rest
-    const wrap=document.getElementById('topExplWrap'), tb=document.getElementById('topExplBody'), rs=tb.querySelectorAll('tr');
-    if(rs.length>5){ const th=wrap.querySelector('thead'); let h=th?th.offsetHeight:0;
-      for(let i=0;i<5;i++) h+=rs[i].offsetHeight; wrap.style.maxHeight=(h+2)+'px'; }
-    else wrap.style.maxHeight='';
-  }
-  fillTopExpl();
-  topRefresh = fillTopExpl;
-  d.querySelector('#topN').addEventListener('input', e=>{
-    const v = Math.max(1, Math.min(parseInt(e.target.value)||1, maxN));
-    STATE.topN = v; d.querySelector('#topNval').textContent = topLabel(v); fillTopExpl();
-  });
-  d.querySelector('#topSev').value = STATE.topSev;
-  d.querySelector('#topSev').addEventListener('change', e=>{ STATE.topSev = e.target.value; fillTopExpl(); });
+  // (Removed the "Top vulnerabilities past SLA" panel — it duplicated the plugin × segment matrix.
+  //  R.topVulns is still computed for the CSV / full-report exports.)
 
   // vulnerabilities by OS, stacked by SLA status (within SLA + past-SLA by severity)
   const osTot={}; cum.forEach(r=>{ const o=r.operatingSystem||'Unknown'; osTot[o]=(osTot[o]||0)+1; });
@@ -698,23 +655,38 @@ function render(){
       for(let i=0;i<10;i++) h+=rs[i].offsetHeight; wrap.style.maxHeight=(h+2)+'px'; }
     else wrap.style.maxHeight='';
   }
+  const findingSort = (a,b)=>(sevR[b.severity]||0)-(sevR[a.severity]||0) || (String(a.pluginName)>String(b.pluginName)?1:-1);
+  const hostFindings = h => { const sev=STATE.hostsSev;
+    return cum.filter(r=>(r.dnsName||r.ip)===h && (sev==='all'||r.severity===sev)).sort(findingSort); };
+  const escTxt = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   function hostDetailHTML(h){
-    const sev=STATE.hostsSev;
-    const rows=cum.filter(r=>(r.dnsName||r.ip)===h && (sev==='all'||r.severity===sev))
-      .sort((a,b)=>(sevR[b.severity]||0)-(sevR[a.severity]||0) || (String(a.pluginName)>String(b.pluginName)?1:-1));
-    const inner=rows.map(r=>`<tr>
-      <td class="sev-${r.severity}" style="white-space:nowrap">${r.severity}</td>
+    const sev=STATE.hostsSev; const rows=hostFindings(h);
+    const inner=rows.map((r,i)=>{ const hasText=!!(r.pluginText||r.description||r.solution);
+      return `<tr class="findingrow" data-host="${h}" data-fidx="${i}" style="cursor:${hasText?'pointer':'default'}">
+      <td class="sev-${r.severity}" style="white-space:nowrap">${hasText?'<span class="fchev" style="display:inline-block;width:11px;color:var(--muted)">▸</span>':'<span style="display:inline-block;width:11px"></span>'}${r.severity}</td>
       <td>${r.pluginName}</td><td style="font-size:12px">${r.cve||'—'}</td>
       <td style="font-size:12px">${r.port}/${r.protocol}</td>
       <td>${isExpl(r)?'<span class="pill over">Exploit</span>':'—'}</td>
-      <td>${pastSla(r)?'<span class="pill over">Past SLA</span>':'<span class="pill ok">Within</span>'}</td></tr>`).join('');
+      <td>${pastSla(r)?'<span class="pill over">Past SLA</span>':'<span class="pill ok">Within</span>'}</td></tr>`; }).join('');
     return `<tr class="hostdetail"><td colspan="5" style="background:var(--panel2);padding:0">
       <div style="padding:8px 12px 10px 26px">
-        <div class="sub" style="margin:0 0 6px">${rows.length} open finding${rows.length===1?'':'s'} on ${h}${sev!=='all'?' · '+sev:''}</div>
+        <div class="sub" style="margin:0 0 6px">${rows.length} open finding${rows.length===1?'':'s'} on ${h}${sev!=='all'?' · '+sev:''} · click a finding for plugin output</div>
         <table style="font-size:13px"><thead><tr><th>Severity</th><th>Plugin</th><th>CVE</th><th>Port</th><th>Exploit</th><th>SLA</th></tr></thead>
         <tbody>${inner}</tbody></table></div></td></tr>`;
   }
+  function findingDetailHTML(h, idx){
+    const r=hostFindings(h)[idx]; if(!r) return '';
+    const block=(label,txt)=> txt? `<div style="margin-top:6px"><div class="sub" style="text-transform:uppercase;letter-spacing:.04em;font-size:10.5px;margin-bottom:2px">${label}</div><pre style="white-space:pre-wrap;word-break:break-word;font-size:12px;margin:0;max-height:240px;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px;color:var(--txt)">${escTxt(txt)}</pre></div>`:'';
+    const body = block('Plugin output', r.pluginText) + block('Description', r.description) + block('Solution', r.solution);
+    return `<tr class="findingdetail"><td colspan="6" style="background:var(--panel);padding:6px 12px 10px 30px">${body||'<span class="sub">No additional detail in this export.</span>'}</td></tr>`;
+  }
   document.getElementById('hostBody').addEventListener('click', e=>{
+    const frow=e.target.closest('tr.findingrow');
+    if(frow){ const chev=frow.querySelector('.fchev'); if(!chev) return;   // only rows with detail text expand
+      const next=frow.nextElementSibling;
+      if(next && next.classList.contains('findingdetail')){ next.remove(); chev.textContent='▸'; }
+      else { frow.insertAdjacentHTML('afterend', findingDetailHTML(frow.dataset.host, +frow.dataset.fidx)); chev.textContent='▾'; }
+      return; }
     const row=e.target.closest('tr.hostrow'); if(!row) return;
     const chev=row.querySelector('.chev'), next=row.nextElementSibling;
     if(next && next.classList.contains('hostdetail')){ next.remove(); if(chev) chev.textContent='▸'; }
@@ -747,11 +719,11 @@ function render(){
       wrap.appendChild(rb);
     }
     p.appendChild(wrap);
-    // clear the top-right corner so the controls never overlap existing header controls
-    const reserve = hasControls ? '215px' : '150px';
-    if(p.classList.contains('cards')){ p.style.position='relative'; p.style.paddingTop='40px'; }
+    // clear the top-right corner so the controls never overlap existing header controls — measured, not guessed
+    const reserveW = (wrap.offsetWidth || 200) + 20;
+    if(p.classList.contains('cards')){ p.style.position='relative'; p.style.paddingTop=((wrap.offsetHeight||26)+16)+'px'; }
     else { const hdr=[...p.children].find(c=>c.tagName==='DIV' && c.querySelector(':scope>h3'));
-      if(hdr) hdr.style.paddingRight=reserve; else if(h) h.style.paddingRight=reserve; }
+      if(hdr) hdr.style.paddingRight=reserveW+'px'; else if(h) h.style.paddingRight=reserveW+'px'; }
   };
   // larger report cards (charts + tables)
   d.querySelectorAll('.panel').forEach(p=>{ if(p.querySelector('canvas')||p.querySelector('table')) attachSave(p); });
@@ -765,7 +737,6 @@ function render(){
   regReset(document.getElementById('slaConfig'), ()=>{ const b=document.getElementById('slaDaysReset'); if(b) b.click(); });
   regReset(d.querySelector('.wif')?.closest('.panel'), ()=>{ const b=document.getElementById('slaReset'); if(b) b.click(); });
   regReset(document.getElementById('sumN')?.closest('.panel'), ()=>{ STATE.summaryN=5; const s=document.getElementById('sumN'); s.value=Math.min(5,sMax); document.getElementById('sumNval').textContent=sLabel(Math.min(5,sMax)); fillSummary(); });
-  regReset(document.getElementById('topN')?.closest('.panel'), ()=>{ STATE.topSev='all'; STATE.topN=5; const ts=document.getElementById('topSev'); if(ts) ts.value='all'; const tn=document.getElementById('topN'); tn.value=Math.min(5,maxN); document.getElementById('topNval').textContent=topLabel(Math.min(5,maxN)); fillTopExpl(); });
   regReset(document.getElementById('hostN')?.closest('.panel'), ()=>{ STATE.hostsSev='all'; STATE.hostsN=10; const hs=document.getElementById('hostSev'); if(hs) hs.value='all'; const hn=document.getElementById('hostN'); hn.value=Math.min(10,hMax); document.getElementById('hostNval').textContent=hLabel(Math.min(10,hMax)); fillHosts(); });
 
   buildJumpNav();
@@ -814,6 +785,54 @@ async function rasterPanel(el){
 function canvasToBlob(canvas, mime, q){ return new Promise(res=>canvas.toBlob(res, mime, q)); }
 function dlBlob(blob, filename){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
 
+// Build an HTML <table> from tab/newline text so spreadsheet apps (Numbers especially) split it into cells.
+function tsvToHtmlTable(tsv){
+  const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const rows=tsv.split('\n').map(line=>{
+    if(line==='') return '<tr><td></td></tr>';
+    return '<tr>'+line.split('\t').map(c=>`<td>${esc(c)}</td>`).join('')+'</tr>';
+  }).join('');
+  return `<table>${rows}</table>`;
+}
+// Per-column character widths across an aoa-sections list (used for HTML colgroup + XLSX !cols).
+function colCharWidths(secs){
+  const maxCols=Math.max(1,...secs.map(s=>Math.max(...s.aoa.map(r=>r.length))));
+  const w=[]; for(let i=0;i<maxCols;i++){ let m=4;
+    secs.forEach(s=>s.aoa.forEach(r=>{ if(r[i]!=null){ const L=String(r[i]).length; if(L>m) m=L; } })); w[i]=m; }
+  return w;
+}
+// Richly-formatted HTML table for the full report: merged navy section bars, bold header rows, sized columns.
+function sectionsToHtmlTable(secs){
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const cw=colCharWidths(secs); const maxCols=cw.length;
+  const colgroup='<colgroup>'+cw.map(c=>`<col style="width:${Math.min(Math.max(c*7+18,48),360)}px">`).join('')+'</colgroup>';
+  const padTd='<td style="border:0"></td>';   // invisible filler so every row is maxCols wide (keeps the table rectangular)
+  let rows='';
+  secs.forEach((s,si)=>{
+    if(si>0) rows+=`<tr><td colspan="${maxCols}" style="height:8px"></td></tr>`;
+    rows+=`<tr><td colspan="${maxCols}" style="font-weight:bold;background:#28415d;color:#ffffff;padding:5px 8px;white-space:nowrap">${esc(s.name)}</td></tr>`;
+    s.aoa.forEach((r,ri)=>{ const head=ri===0;
+      const cells=r.map(c=>`<td style="${head?'font-weight:bold;background:#e9edf2;':''}padding:3px 8px;border:1px solid #c9cdd4;white-space:nowrap">${esc(c)}</td>`);
+      while(cells.length<maxCols) cells.push(padTd);
+      rows+='<tr>'+cells.join('')+'</tr>'; });
+  });
+  return `<table style="border-collapse:collapse;table-layout:fixed;font-family:-apple-system,Segoe UI,sans-serif;font-size:12px;color:#1b2530">${colgroup}${rows}</table>`;
+}
+// Copy tabular text to the clipboard as BOTH text/plain (TSV) and text/html (a table) — pastes cleanly into Excel AND Numbers.
+function copyTable(tsv, okMsg, htmlOverride){
+  const html = htmlOverride || tsvToHtmlTable(tsv);
+  if(window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
+    return navigator.clipboard.write([new ClipboardItem({
+      'text/plain': new Blob([tsv], {type:'text/plain'}),
+      'text/html':  new Blob([html], {type:'text/html'})
+    })]).then(()=>toast(okMsg), e=>{ console.error('copyTable', e); toast('Clipboard write failed'); });
+  }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    return navigator.clipboard.writeText(tsv).then(()=>toast(okMsg), ()=>toast('Clipboard write failed'));
+  }
+  toast('Clipboard not supported here'); return Promise.resolve();
+}
+
 function canvasToGifBlob(canvas){
   const g=window.gifenc; const {width,height}=canvas;
   const data=canvas.getContext('2d').getImageData(0,0,width,height).data;
@@ -850,8 +869,7 @@ async function savePanel(el, name, fmt, btn){
     if(fmt==='clipboard-text'){
       const txt=cardToText(el);
       if(!txt){ toast('No data to copy from this card'); return; }
-      if(navigator.clipboard && navigator.clipboard.writeText){ await navigator.clipboard.writeText(txt); toast('Data copied to clipboard'); }
-      else toast('Clipboard not supported here');
+      await copyTable(txt, 'Data copied — paste into Excel or Numbers');
       return;
     }
     const canvas = await rasterPanel(el);
@@ -910,8 +928,29 @@ function doExport(kind){
     dl(`vm_full_report_${stamp}.csv`, parts.join('\n\n\n'), 'text/csv'); return; }
   if(kind==='full-xlsx'){
     const wb=XLSX.utils.book_new();
-    reportSections(R).forEach(s=>XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s.aoa), s.name.slice(0,31)));
+    reportSections(R).forEach(s=>{ const ws=XLSX.utils.aoa_to_sheet(s.aoa);
+      ws['!cols']=colCharWidths([s]).map(c=>({wch:Math.min(Math.max(c+2,8),60)}));   // auto-size each column to its content
+      XLSX.utils.book_append_sheet(wb, ws, s.name.slice(0,31)); });
     XLSX.writeFile(wb, `vm_full_report_${stamp}.xlsx`); return; }
+  if(kind==='full-csv-clip'){
+    if(!(navigator.clipboard && navigator.clipboard.writeText)){ toast('Clipboard not supported here'); return; }
+    const txt=reportSections(R).map(s=>`# ${s.name}\n`+toCsv(s.aoa[0]||[], s.aoa.slice(1))).join('\n\n\n');
+    navigator.clipboard.writeText(txt).then(()=>toast('Full report CSV copied to clipboard'), ()=>toast('Clipboard write failed')); return; }
+  if(kind==='full-tsv-clip'){
+    const secs=reportSections(R); const cell=c=>String(c==null?'':c).replace(/[\t\r\n]+/g,' ');
+    const txt=secs.map(s=>`# ${s.name}\n`+s.aoa.map(row=>row.map(cell).join('\t')).join('\n')).join('\n\n\n');
+    copyTable(txt, 'Full report copied — paste into Excel or Numbers', sectionsToHtmlTable(secs)); return; }
+  if(kind==='full-img-clip'){
+    if(!(navigator.clipboard && window.ClipboardItem)){ toast('Clipboard not supported here'); return; }
+    showLoading('Rendering full report image…');
+    const safety=setTimeout(hideLoading, 12000);     // never let the overlay get stuck if the write stalls
+    const done=()=>{ clearTimeout(safety); hideLoading(); };
+    const blobP=(async()=>{ const c=await rasterPanel(document.getElementById('dashboard')); return await canvasToBlob(c,'image/png'); })();
+    navigator.clipboard.write([new ClipboardItem({'image/png':blobP})])
+      .then(()=>toast('Full report image copied to clipboard'))
+      .catch(e=>{ console.error('full-img-clip', e); toast('Image copy failed'); })
+      .finally(done);
+    return; }
   if(kind==='report-html'){
     const bg=getComputedStyle(document.documentElement).getPropertyValue('--panel').trim()||'#171a23';
     const src=document.getElementById('dashboard');
@@ -1021,7 +1060,6 @@ const PANEL_TIPS = {
   'Vulnerabilities past remediation SLA by segment':'Plugin × segment counts of open findings past their remediation SLA — driven live by the SLA day targets above.',
   'Open findings by severity':'Severity breakdown of all open findings.',
   'Exploitable vulnerabilities by SLA, and segment':'Per-segment exploitable findings vs the per-segment SLA threshold (assets × 0.25).',
-  'Top vulnerabilities past SLA':'Top plugins among findings past their remediation SLA. Filter by severity and choose how many to show.',
   'Vulnerabilities by operating system and SLA status':'Open findings per operating system, stacked by within-SLA and past-SLA (by severity).',
   'Most-exposed hosts (by exploitable findings)':'Hosts ranked by exploitable finding count. Filter by severity and choose how many to show.'
 };
