@@ -727,6 +727,8 @@ function render(){
   };
   // larger report cards (charts + tables)
   d.querySelectorAll('.panel').forEach(p=>{ if(p.querySelector('canvas')||p.querySelector('table')) attachSave(p); });
+  // clickable column-header sorting on data tables (skip editable tables with inputs)
+  d.querySelectorAll('.panel table').forEach(t=>{ if(!t.querySelector('tbody input')) makeSortable(t); });
   // card-grid blocks with no table/canvas: executive KPI strip + per-severity SLA-aging cards
   attachSave(d.querySelector('.cards'), 'executive_kpis');
   attachSave(document.getElementById('slaConfig'));
@@ -885,6 +887,31 @@ async function savePanel(el, name, fmt, btn){
     dlBlob(blob, (name||'card')+'_'+stamp+'.'+(fmt==='jpeg'?'jpg':fmt));
   }catch(err){ console.error('savePanel', err); toast('Save failed'); }
   finally{ if(btn){ btn.classList.remove('saving'); btn.textContent='Save'; } }
+}
+
+// ---------- clickable column-header sorting (generic, DOM-based) ----------
+function makeSortable(table){
+  if(!table || table._sortable) return; const thead=table.tHead, tbody=table.tBodies[0]; if(!thead||!tbody) return;
+  table._sortable=true; const ths=[...thead.rows[0].cells];
+  const numOf=s=>{ const n=parseFloat(String(s).replace(/[,$%\s]/g,'')); return isNaN(n)?null:n; };
+  ths.forEach((th,idx)=>{ if(th.dataset.nosort!==undefined) return; th.style.cursor='pointer'; if(!th.title) th.title='Sort';
+    th.addEventListener('click',()=>{
+      const dir = th._dir = (th._dir===1?-1:1);
+      ths.forEach(o=>{ if(o!==th){ o._dir=0; const s=o.querySelector('.sortind'); if(s) s.remove(); } });
+      let ind=th.querySelector('.sortind'); if(!ind){ ind=document.createElement('span'); ind.className='sortind'; ind.style.cssText='margin-left:4px;opacity:.7'; th.appendChild(ind); }
+      ind.textContent = dir===1?'▲':'▼';
+      [...tbody.querySelectorAll('tr.hostdetail,tr.findingdetail')].forEach(r=>r.remove());           // collapse expansions
+      tbody.querySelectorAll('.chev,.fchev').forEach(c=>c.textContent='▸');
+      const rows=[...tbody.rows]; const pin=rows.filter(r=>/^all\s/i.test((r.cells[0]?.textContent||'').trim()));
+      const data=rows.filter(r=>!pin.includes(r));
+      const val=r=>{ const c=r.cells[idx]; return c? c.textContent.trim() : ''; };
+      const allNum=data.length && data.every(r=>{ const t=val(r); return t===''||t==='—'||numOf(t)!==null; });
+      data.sort((a,b)=>{ let x=val(a),y=val(b);
+        if(allNum){ x=numOf(x); y=numOf(y); x=x==null?-Infinity:x; y=y==null?-Infinity:y; return (x-y)*dir; }
+        return (x.toUpperCase()>y.toUpperCase()?1:x.toUpperCase()<y.toUpperCase()?-1:0)*dir; });
+      data.concat(pin).forEach(r=>tbody.appendChild(r));
+    });
+  });
 }
 
 // ---------- export ----------
