@@ -132,7 +132,7 @@
   <div class="row noprint">
     <span class="priv">&#128274; 100% local — your data never leaves this browser</span>
     <select id="cbSel" class="hostinput" style="width:auto;padding:8px 10px" title="Color-blind-safe palette" aria-label="Color palette">
-      <option value="default">Theme: Default</option>
+      <option value="default">Vivid</option>
       <option value="deuteranopia">Deuteranopia-safe</option>
       <option value="protanopia">Protanopia-safe</option>
       <option value="tritanopia">Tritanopia-safe</option>
@@ -141,6 +141,8 @@
     <select id="exportSel" class="hostinput" style="width:auto;padding:8px 10px">
       <option value="report-html">Full report (HTML)</option>
       <option value="report-pdf">Full report (PDF / print)</option>
+      <option value="full-csv">Full report (CSV)</option>
+      <option value="full-xlsx">Full report (XLSX)</option>
       <option value="exec-md">Executive report (Markdown)</option>
       <option value="sla-csv">SLA summary (CSV)</option>
       <option value="sla-xlsx">SLA summary (XLSX)</option>
@@ -211,7 +213,7 @@ function showLoading(m){ const l=document.getElementById('loading'); if(!l) retu
 function hideLoading(){ const l=document.getElementById('loading'); if(l) l.style.display='none'; }
 const $ = s => document.querySelector(s);
 const DEFAULT_SLA_DAYS = { Critical: 30, High: 30, Medium: 90, Low: 120 };
-let STATE = { cumulative: [], mitigated: [], hostOverride: {}, topN: 5, summaryN: 5, cbTheme: 'default', topSev: 'all', hostsN: 10, hostsSev: 'all', segFilter: 'all',
+let STATE = { cumulative: [], mitigated: [], hostOverride: {}, topN: 5, summaryN: 5, cbTheme: 'protanopia', topSev: 'all', hostsN: 10, hostsSev: 'all', segFilter: 'all',
   slaDays: { ...DEFAULT_SLA_DAYS } };
 const PALS_DEFAULT = {crit:'#e24b4a', high:'#ef9f27', med:'#378add', low:'#888780', info:'#5a5f6e', ok:'#3bb273', accent:'#4f8cff'};
 const PALS_CB = {
@@ -266,7 +268,7 @@ $('#jumpSel').addEventListener('change', e=>{ if(e.target.value){ const el=docum
   if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); e.target.value=''; } });
 $('#segSel').addEventListener('change', e=>{ STATE.segFilter=e.target.value; if(window._report) render(); });
 $('#cbSel').addEventListener('change', e=>applyPalette(e.target.value));
-applyPalette((function(){ try{ return localStorage.getItem('tvd-cb'); }catch(e){ return null; } })() || 'default');
+applyPalette((function(){ try{ return localStorage.getItem('tvd-cb'); }catch(e){ return null; } })() || 'protanopia');
 $('#cfgSla').addEventListener('click', ()=>{ const el=document.getElementById('slaConfig');
   if(el){ el.scrollIntoView({behavior:'smooth',block:'start'}); const inp=el.querySelector('.slainp'); if(inp) setTimeout(()=>inp.focus(),300); }
   else alert('Load your Tenable data first to configure SLAs.'); });
@@ -732,7 +734,7 @@ function render(){
     const name=(forceName || (h?h.textContent:'panel')).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
     const wrap=document.createElement('div'); wrap.className='savewrap noprint';
     const sel=document.createElement('select'); sel.title='Save as';
-    [['png','PNG'],['jpeg','JPEG'],['webp','WEBP'],['gif','GIF'],['clipboard','Clipboard']]
+    [['png','PNG'],['jpeg','JPEG'],['webp','WEBP'],['gif','GIF'],['clipboard-img','Clipboard (image)'],['clipboard-text','Clipboard (text)']]
       .forEach(([v,l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; sel.appendChild(o); });
     const b=document.createElement('button'); b.textContent='Save'; b.title='Save this card as an image';
     b.addEventListener('click', ()=>savePanel(p, name, sel.value, b));
@@ -779,6 +781,7 @@ function render(){
     topVulns: topBy(expl, r=>r.pluginName, STATE.topN).map(([name,rows])=>({plugin:name, pluginID:rows[0].pluginID, severity:rows[0].severity,
       cve:rows[0].cve, exploitFrameworks:rows[0].exploitFrameworks, instances:rows.length, hosts:uniqHosts(rows)})),
     hosts: topHosts.map(([h,o])=>({host:h, bu:o.bu, os:o.os, ip:o.ip, exploitable:o.n})),
+    segMatrix: pRows.map(([plugin,o])=>{ const row={plugin, severity:o.sev}; buses.forEach(b=>row[segShort(b)]=o.by[b]||0); row.total=o.total; return row; }),
     severity: sevCount, os: osTot, byMonth,
     cumulative: cum, mitigated: mit
   };
@@ -819,17 +822,44 @@ function canvasToGifBlob(canvas){
   return new Blob([enc.bytesView()],{type:'image/gif'});
 }
 
+// Extract a card's underlying data as tab-separated text (paste-ready for Excel): tables, KPI cards, or chart data.
+function cardToText(p){
+  const cellText = c => { const inp=c.querySelector('input'); return (inp?inp.value:c.textContent).trim().replace(/\s+/g,' '); };
+  const tbl = p.querySelector('table');
+  if(tbl){
+    const rows=[...tbl.querySelectorAll(':scope > thead > tr, :scope > tbody > tr')].filter(r=>!r.classList.contains('hostdetail'));
+    return rows.map(r=>[...r.children].map(cellText).join('\t')).join('\n');
+  }
+  const cv=p.querySelector('canvas');
+  if(cv && window.Chart){ const ch=Chart.getChart(cv);
+    if(ch){ const d=ch.data, ds=d.datasets||[];
+      const head=['Label',...ds.map(x=>x.label||'Value')].join('\t');
+      const body=(d.labels||[]).map((lab,i)=>[lab,...ds.map(x=>x.data[i])].join('\t')).join('\n');
+      return head+'\n'+body; } }
+  const cards=[...p.querySelectorAll('.card')];
+  if(cards.length) return cards.map(c=>{ const l=c.querySelector('.l'), v=c.querySelector('.v');
+    return ((l?l.textContent:'').trim().replace(/\s+/g,' '))+'\t'+((v?v.textContent:'').trim()); }).filter(x=>x.trim()!=='\t'&&x.trim()).join('\n');
+  return '';
+}
+
 async function savePanel(el, name, fmt, btn){
   fmt = fmt || 'png';
   const stamp=new Date().toISOString().slice(0,10);
   if(btn){ btn.classList.add('saving'); btn.textContent='…'; }
   try{
+    if(fmt==='clipboard-text'){
+      const txt=cardToText(el);
+      if(!txt){ toast('No data to copy from this card'); return; }
+      if(navigator.clipboard && navigator.clipboard.writeText){ await navigator.clipboard.writeText(txt); toast('Data copied to clipboard'); }
+      else toast('Clipboard not supported here');
+      return;
+    }
     const canvas = await rasterPanel(el);
-    if(fmt==='clipboard'){
+    if(fmt==='clipboard-img'){
       if(!(navigator.clipboard && window.ClipboardItem)){ toast('Clipboard not supported here'); return; }
       const blob=await canvasToBlob(canvas,'image/png');
       await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
-      toast('Copied to clipboard'); return;
+      toast('Image copied to clipboard'); return;
     }
     if(fmt==='gif'){ dlBlob(canvasToGifBlob(canvas), (name||'card')+'_'+stamp+'.gif'); return; }
     const mime='image/'+fmt; const q=(fmt==='jpeg'||fmt==='webp')?0.95:undefined;
@@ -850,10 +880,38 @@ function slaTable(){ const r=window._report.sla;
   return { headers:['segment','assets','exploitable_open','exploitable_per_asset','pct_of_sla','status','non_exploitable_open','exploitable_mitigated'],
     rows:r.map(x=>[x.b,x.h,x.e,x.ratio.toFixed(4),Math.round(x.ratio/SLA*100)+'%',x.over?'Over SLA':'Within SLA',x.non,x.mitE]) }; }
 
+// All report sections as {name, aoa} blocks — drives the Full report (CSV/XLSX) exports.
+function reportSections(R){
+  const kv = obj => Object.entries(obj).map(([k,v])=>[k,v]);
+  const aoaObjs = objs => { if(!objs||!objs.length) return [['(no rows)']]; const cols=[...new Set(objs.flatMap(o=>Object.keys(o)))];
+    return [cols, ...objs.map(o=>cols.map(c=>o[c]==null?'':o[c]))]; };
+  const t=slaTable(); const pd=R.slaPastDue||{slaDays:{},counts:{}}; const dys=pd.slaDays||{}, c=pd.counts||{};
+  return [
+    {name:'Metrics', aoa:[['metric','value'],...kv(R.metrics)]},
+    {name:'SLA by Segment', aoa:[t.headers,...t.rows]},
+    {name:'Past SLA Counts', aoa:[['severity','day_target','past_sla_count'],
+      ['Critical',dys.Critical,c.Critical],['High',dys.High,c.High],['Medium',dys.Medium,c.Medium],['Low',dys.Low,c.Low],
+      ['Total','',c.total],['Exploitable past SLA','',c.expl]]},
+    {name:'SLA by Plugin x Segment', aoa:aoaObjs(R.segMatrix)},
+    {name:'Top Vulnerabilities', aoa:aoaObjs(R.topVulns)},
+    {name:'Most Exposed Hosts', aoa:aoaObjs(R.hosts)},
+    {name:'Severity', aoa:[['severity','count'],...kv(R.severity)]},
+    {name:'Operating System', aoa:[['operatingSystem','count'],...kv(R.os)]},
+    {name:'Mitigated by Month', aoa:[['month','count'],...kv(R.byMonth)]}
+  ];
+}
+
 function doExport(kind){
   const R=window._report; if(!R){ alert('Load data first.'); return; }
   const stamp=new Date().toISOString().slice(0,10);
   if(kind==='report-pdf'){ window.print(); return; }
+  if(kind==='full-csv'){
+    const parts=reportSections(R).map(s=>`# ${s.name}\n`+toCsv(s.aoa[0]||[], s.aoa.slice(1)));
+    dl(`vm_full_report_${stamp}.csv`, parts.join('\n\n\n'), 'text/csv'); return; }
+  if(kind==='full-xlsx'){
+    const wb=XLSX.utils.book_new();
+    reportSections(R).forEach(s=>XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s.aoa), s.name.slice(0,31)));
+    XLSX.writeFile(wb, `vm_full_report_${stamp}.xlsx`); return; }
   if(kind==='report-html'){
     const bg=getComputedStyle(document.documentElement).getPropertyValue('--panel').trim()||'#171a23';
     const src=document.getElementById('dashboard');
